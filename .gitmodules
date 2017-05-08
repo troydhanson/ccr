@@ -1,0 +1,3 @@
+[submodule "lib/libut"]
+	path = lib/libut
+	url = https://github.com/troydhanson/libut.git

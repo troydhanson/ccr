@@ -1,0 +1,2 @@
+srcdir = @srcdir@
+
