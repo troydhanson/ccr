@@ -362,7 +362,7 @@ xcpf cc_conversions[/*from*/NUM_TYPES][/*to*/NUM_TYPES] = {
 /* convert a single item from flat cc buffer to a refcounted json value. 
  * the caller is expected to steal the reference (e.g. json_set_object_new).
  * return the number of bytes consumed (indexed into from) or -1 on error */
-int cc_to_json(cc_type ot, char *from, size_t len, json_t **j) {
+int slot_to_json(cc_type ot, char *from, size_t len, json_t **j) {
   int rc = -1;
   unsigned l=0;
   int8_t i8;

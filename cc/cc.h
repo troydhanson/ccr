@@ -2,11 +2,10 @@
 #define __CC_H__
 
 /* flags */
-#define CC_TO_JSON      (1U << 0)
-#define CC_FROM_JSON    (1U << 1)
-#define CC_PRETTY       (1U << 2)
+#define CC_PRETTY       (1U << 1)
+#define CC_FILE         (1U << 2)
+#define CC_BUFFER       (1U << 3)
 
-/* TODO u32 etc */
 #define TYPES x(i8) x(i16) x(i32) x(str) x(d64) x(ipv4) x(mac)
 #define x(t) CC_ ## t,
 typedef enum { TYPES } cc_type;
@@ -23,7 +22,7 @@ struct cc_map {
 };
 
 /* API */
-struct cc * cc_open(char *file, int flags, ...);
+struct cc * cc_open(char *file_or_text, int flags, ...);
 int cc_close(struct cc *cc);
 
 /* associate fields with caller memory locations */
@@ -31,7 +30,7 @@ int cc_mapv(struct cc *cc, struct cc_map *map, int count);
 
 /* pack caller memory to flattened buffer */
 int cc_capture(struct cc *cc, char **out, size_t *len);
-int cc_convert(struct cc *cc, char **out, size_t *out_len,
+int cc_to_json(struct cc *cc, char **out, size_t *out_len,
        char *in, size_t in_len, int flags);
 
 /* reads flattened buffer, unpack to caller memory */

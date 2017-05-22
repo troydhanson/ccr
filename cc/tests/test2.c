@@ -13,7 +13,7 @@ int main() {
   };
 
   struct cc *cc;
-  cc = cc_open(conf, 0);
+  cc = cc_open(conf, CC_FILE);
   if (cc == NULL) goto done;
 
   rc = cc_mapv(cc, map, adim(map));

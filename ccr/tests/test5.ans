@@ -1,0 +1,5 @@
+closing
+00000000 2a 00 00 00 05 00 00 00 68 65 6c 6c 6f 05 00 00 *.......hello...
+00000010 00 77 6f 72 6c 64                               .world          
+{"handle": "wave", "id": 99, "name": "liquid"}
+closing

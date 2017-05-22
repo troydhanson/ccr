@@ -60,6 +60,7 @@ AC_CONFIG_FILES([Makefile
    lib/libut_build/Makefile
    cc/Makefile
    ccr/Makefile
+   ccr/src/Makefile
    ccr/util/Makefile
    ])
 AC_OUTPUT

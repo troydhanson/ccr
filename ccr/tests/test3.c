@@ -14,8 +14,8 @@ int main() {
   };
 
   struct ccr *ccr;
-  if (ccr_init(ring, 100, CCR_DROP|CCR_OVERWRITE) < 0) goto done;
-  ccr = ccr_open(ccfile, ring, CCR_WRONLY);
+  if (ccr_init(ring, 100, CCR_DROP|CCR_OVERWRITE|CCR_CASTFILE, ccfile) < 0) goto done;
+  ccr = ccr_open(ring, CCR_WRONLY);
   if (ccr == NULL) goto done;
   rc = ccr_mapv(ccr, map, adim(map));
   if (rc < 0) goto done;

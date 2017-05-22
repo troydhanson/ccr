@@ -1,22 +1,75 @@
 #include "cc-internal.h"
 
-static int parse_cc(struct cc *cc, char *file) {
-  int rc = -1;
-  char line[100], *label;
-  FILE *f=NULL;
-  char *sp,*nl,*def;
-  unsigned t;
+static int slurp(char *file, char **text, size_t *len) {
+  int fd=-1, rc=-1;
+  struct stat s;
+  ssize_t nr;
 
-  if ( (f = fopen(file,"r")) == NULL) {
-    fprintf(stderr,"can't open %s: %s\n", file, strerror(errno));
+  *text=NULL;
+  *len = 0;
+
+  if (stat(file, &s) == -1) {
+    fprintf(stderr,"can't stat %s: %s", file, strerror(errno));
     goto done;
   }
 
-  /* parse the type specifier, label and optional default */
-  while (fgets(line,sizeof(line),f) != NULL) {
+  *len = s.st_size;
+  if (*len == 0) { /* special case, empty file */
+    rc=0;
+    goto done;
+  }
 
-    sp = strchr(line,' '); if (!sp) continue;
-    nl = strchr(line,'\n'); if (nl) *nl='\0';
+  fd = open(file, O_RDONLY);
+  if (fd == -1) {
+    fprintf(stderr,"can't open %s: %s", file, strerror(errno));
+    goto done;
+  }
+
+  *text = malloc(*len);
+  if (*text == NULL) {
+    fprintf(stderr,"out of memory\n");
+    goto done;
+  }
+
+  nr = read(fd, *text, *len);
+  if (nr < 0) {
+    fprintf(stderr,"read failed: %s", strerror(errno));
+    goto done;
+  }
+
+  rc = 0;
+
+ done:
+  if ((rc < 0) && *text) { free(*text); *text=NULL; }
+  if (fd != -1) close(fd);
+  return rc;
+}
+
+static int parse_cc(struct cc *cc, char *text, size_t len) {
+  int rc = -1, label_len;
+  char *line, *label;
+  char *sp,*nl,*def, *c, *next_line;
+  unsigned t;
+
+  /* parse the type specifier, label and optional default */
+  for(line = text; line; line = next_line) {
+
+    sp = NULL;
+    nl = NULL;
+    next_line = NULL;
+
+    for(c = line; c < text + len; c++) {
+      if (*c == ' ' ) { if (!sp) sp = c; }
+      if (*c == '\n') { nl = c; break; };
+    }
+
+    if ((nl == NULL) || (sp == NULL)) {
+      int len_remaining = len - (line - text);
+      fprintf(stderr,"syntax error in [%.*s]\n", len_remaining, line);
+      goto done;
+    }
+
+    next_line = (nl + 1 < text + len) ? (nl + 1) : NULL;
 
     for(t=0; t<NUM_TYPES; t++) {
       if(!strncmp(cc_types[t],line,sp-line)) break;
@@ -28,14 +81,19 @@ static int parse_cc(struct cc *cc, char *file) {
     }
 
     label = sp+1;
-    sp = strchr(label,' ');
-    if (sp) *sp = '\0';
+    label_len = 0;
+    def = NULL;
 
-    def = sp ? sp+1 : NULL;
+    for(c = label; c != nl; c++) {
+      if (*c == ' ') {
+        def = c + 1;
+        break;
+      } else label_len++;
+    }
 
     /* names */
     utstring_clear(&cc->tmp);
-    utstring_printf(&cc->tmp,"%s", label);
+    utstring_bincpy(&cc->tmp, label, label_len);
     utvector_push(&cc->names, &cc->tmp);
 
     /* types */
@@ -43,7 +101,7 @@ static int parse_cc(struct cc *cc, char *file) {
 
     /* defaults */
     utstring_clear(&cc->tmp);
-    if (def) utstring_printf(&cc->tmp,"%s", def);
+    if (def) utstring_bincpy(&cc->tmp, def, nl-def);
     utvector_push(&cc->defaults, &cc->tmp);
 
     /* maps */
@@ -54,32 +112,57 @@ static int parse_cc(struct cc *cc, char *file) {
   rc = 0;
 
  done:
-  if (f) fclose(f);
   return rc;
 }
 
 /* open the cc file describing the buffer format */
+struct cc * cc_open( char *file_or_text, int flags, ...) {
+  char *text=NULL, *file;
+  int rc = -1, need_free=0;
+  struct cc *cc = NULL;
+  size_t len;
 
-struct cc * cc_open( char *file, int flags, ...) {
-  int rc = -1;
+  va_list ap;
+  va_start(ap, flags);
 
-  struct cc *cc = calloc(1, sizeof(*cc));
-  if (cc == NULL) { fprintf(stderr,"out of memory\n"); goto done; }
+  /* only allow one mode or the other */
+  if (((flags & CC_FILE) ^ (flags & CC_BUFFER)) == 0) {
+    fprintf(stderr,"cc_open: invalid flags\n");
+    goto done;
+  }
 
+  cc = calloc(1, sizeof(*cc));
+  if (cc == NULL) {
+    fprintf(stderr,"cc_open: out of memory\n");
+    goto done;
+  }
   utmm_init(&cc_mm,cc,1);
-  if (parse_cc(cc, file) < 0) goto done;
-  if (flags) goto done;
+
+  if (flags & CC_FILE) {
+    file = file_or_text;
+    if (slurp(file, &text, &len) < 0) goto done;
+    need_free = 1;
+  }
+
+  if (flags & CC_BUFFER) {
+    text = file_or_text;
+    len = va_arg(ap, size_t);
+  }
+
+  if (parse_cc(cc, text, len) < 0) goto done;
 
   rc = 0;
 
  done:
 
+  if (text && need_free) free(text);
   if ((rc < 0) && cc) {
     utmm_fini(&cc_mm,cc,1);
     free(cc);
     cc = NULL;
   }
 
+  va_end(ap);
   return cc;
 }
 
@@ -187,66 +270,65 @@ int cc_capture(struct cc *cc, char **out, size_t *len) {
   return rc;
 }
 
-/* convert a flat buffer to (or from) JSON 
- * the output is volatile - copy immediately if caller requires saving
+/*
+ * convert a flat buffer to JSON 
+ * output is volatile - immediately upon return, or copy
+ *
  */
-int cc_convert(struct cc *cc, char **out, size_t *out_len,
+int cc_to_json(struct cc *cc, char **out, size_t *out_len,
        char *in, size_t in_len, int flags) {
+
   int rc = -1, i, u, json_flags=0;
-  UT_string *fn;
   char *key, *f, *o;
+  UT_string *fn;
   cc_type *ot;
   json_t *j;
   size_t l;
 
-  if (flags & CC_TO_JSON) {
-    f = utstring_body(&cc->flat);
-    l = utstring_len(&cc->flat);
-    json_object_clear(cc->json);
+  f = in;
+  l = in_len;
 
+  /* iterate over the cast format to interpret buffer.
+   * convert each slot to json, adding to json object */
+  i = 0;
+  fn = NULL;
+  json_object_clear(cc->json);
 
-    i = 0;
-    fn = NULL;
-    while ( (fn = utvector_next(&cc->names, fn))) {
-      key = utstring_body(fn);
-      ot = utvector_elt(&cc->output_types, i);
-      u = cc_to_json(*ot,f,l,&j);
-      if (u < 0) goto done;
-      if (json_object_set_new(cc->json, key, j) < 0) goto done;
-      f += u;
-      l -= u;
-      i++;
-    }
+  while ( (fn = utvector_next(&cc->names, fn))) {
+    key = utstring_body(fn);
+    ot = utvector_elt(&cc->output_types, i);
+    u = slot_to_json(*ot,f,l,&j);
+    if (u < 0) goto done;
+    if (json_object_set_new(cc->json, key, j) < 0) goto done;
+    f += u;
+    l -= u;
+    i++;
+  }
 
-    /* dump json into cc->tmp */
-    utstring_clear(&cc->tmp);
-
-   json_flags |= JSON_SORT_KEYS;
-   /* TODO: support pretty print flags */
+  /* dump resulting json into temp output buffer */
+  utstring_clear(&cc->tmp);
+  json_flags |= JSON_SORT_KEYS;
+  json_flags |= (flags & CC_PRETTY) ? JSON_INDENT(1) : 0;
 
 #if JANSSON_VERSION_HEX >= 0x021000
-   int failsafe = 0;
-   tryagain:
-    *out = utstring_body(&cc->tmp);
-    *out_len = json_dumpb(cc->json, *out, cc->tmp.n, json_flags);
-    if (*out_len > cc->tmp.n) {
-      utstring_reserve(&cc->tmp,*out_len);
-      if (failsafe++) goto done;
-      goto tryagain;
-    }
+ int failsafe = 0;
+ tryagain:
+  *out = utstring_body(&cc->tmp);
+  *out_len = json_dumpb(cc->json, *out, cc->tmp.n, json_flags);
+  if (*out_len > cc->tmp.n) {
+    utstring_reserve(&cc->tmp,*out_len);
+    if (failsafe++) goto done;
+    goto tryagain;
+  }
 #else
-    /* older jansson allocates */
-    o = json_dumps(cc->json, json_flags);
-    if (o == NULL) goto done;
-    *out_len = strlen(o);
-    utstring_bincpy(&cc->tmp, o, *out_len);
-    *out = utstring_body(&cc->tmp);
-    free(o);
+  /* older jansson allocates */
+  o = json_dumps(cc->json, json_flags);
+  if (o == NULL) goto done;
+  *out_len = strlen(o);
+  utstring_bincpy(&cc->tmp, o, *out_len);
+  *out = utstring_body(&cc->tmp);
+  free(o);
 #endif
-  }
-  else if (flags & CC_FROM_JSON) {
-    /* TODO */
-  }
 
   rc = 0;
 
@@ -254,6 +336,7 @@ int cc_convert(struct cc *cc, char **out, size_t *out_len,
   return rc;
 }
 
+#if 0
 int cc_restore(struct cc *cc, char *flat, size_t len) {
   int rc = -1;
 
@@ -262,4 +345,4 @@ int cc_restore(struct cc *cc, char *flat, size_t len) {
  done:
   return rc;
 }
-
+#endif

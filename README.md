@@ -4,7 +4,7 @@ Originally part of [fluxcap](https://github.com/troydhanson/fluxcap).
 
 High level concept
 
-SHR: shared ring (submodule)
+SHR: shared ring (dependency)
 
 SHR is a bounded queue implemented in the form a ring buffer. The items
 in the queue are opaque, arbitrary binary data. SHR provides read/write

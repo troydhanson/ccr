@@ -5,8 +5,12 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <assert.h>
+#include <stdarg.h>
 #include <limits.h>
+#include <fcntl.h>
 #include <errno.h>
 #include "libut.h"
 #include "cc.h"
@@ -37,6 +41,6 @@ static char *cc_types[] = { TYPES };
 /* we have a table of conversion functions, which have this signature */
 typedef int (*xcpf)(UT_string *to, void *from); /* caller memory -> cc */
 xcpf cc_conversions[NUM_TYPES][NUM_TYPES];
-int cc_to_json(cc_type ot, char *from, size_t from_len, json_t **j);
+int slot_to_json(cc_type ot, char *from, size_t from_len, json_t **j);
 
 #endif // _CC_INTERNAL_H__

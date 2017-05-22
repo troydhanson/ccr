@@ -1,10 +1,10 @@
-PROGS=test1 test2 test3 test4
+PROGS=test1 test2 test3 test4 test5
 OBJS=$(patsubst %,%.o,$(PROGS))
 
-CFLAGS = -I.. -I../../libut/include -I../../cc
+CFLAGS = -I../src -I../../libut/include -I../../cc
 CFLAGS += -g -O0
 CFLAGS += -Wall -Wextra
-LDFLAGS=-L.. -lccr -lshr -ljansson
+LDFLAGS=-L../src -lccr -lshr -ljansson
 
 TEST_TARGET=run_tests
 TESTS=./do_tests

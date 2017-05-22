@@ -7,7 +7,7 @@ int main() {
   int rc=-1;
 
   struct cc *cc;
-  cc = cc_open(conf, 0);
+  cc = cc_open(conf, CC_FILE);
   if (cc == NULL) goto done;
   cc_close(cc);
 
