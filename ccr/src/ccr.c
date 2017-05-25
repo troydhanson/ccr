@@ -26,7 +26,7 @@ static int slurp(char *file, char **text, size_t *len) {
   *len = 0;
 
   if (stat(file, &s) == -1) {
-    fprintf(stderr,"can't stat %s: %s", file, strerror(errno));
+    fprintf(stderr,"can't stat %s: %s\n", file, strerror(errno));
     goto done;
   }
 
@@ -38,7 +38,7 @@ static int slurp(char *file, char **text, size_t *len) {
 
   fd = open(file, O_RDONLY);
   if (fd == -1) {
-    fprintf(stderr,"can't open %s: %s", file, strerror(errno));
+    fprintf(stderr,"can't open %s: %s\n", file, strerror(errno));
     goto done;
   }
 
@@ -50,7 +50,7 @@ static int slurp(char *file, char **text, size_t *len) {
 
   nr = read(fd, *text, *len);
   if (nr < 0) {
-    fprintf(stderr,"read failed: %s", strerror(errno));
+    fprintf(stderr,"read failed: %s\n", strerror(errno));
     goto done;
   }
 
