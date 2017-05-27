@@ -215,7 +215,11 @@ int ccr_getnext(struct ccr *ccr, int flags, ...) {
     goto done;
   }
 
-  assert(sc > 0); /* blocking mode only returns if data */
+  /* a reader in nonblocking mode can get a 0 (no data) */
+  if (sc == 0) {
+    rc = 0;
+    goto done;
+  }
 
   /* obtained a frame. provide to caller in raw or json */
   if (flags & CCR_BUFFER) {

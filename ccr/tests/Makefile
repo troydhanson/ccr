@@ -1,4 +1,4 @@
-PROGS=test1 test2 test3 test4 test5
+PROGS=test1 test2 test3 test4 test5 test6
 OBJS=$(patsubst %,%.o,$(PROGS))
 
 CFLAGS = -I../src -I../../libut/include -I../../cc
