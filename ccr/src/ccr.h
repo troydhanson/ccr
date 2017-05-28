@@ -13,6 +13,7 @@
 #define CCR_OVERWRITE (1U << 6)
 #define CCR_CASTFILE  (1U << 7)
 #define CCR_JSON      (1U << 8)
+#define CCR_PRETTY    (1U << 9)
 
 struct ccr; /* defined internally */
 
@@ -21,7 +22,7 @@ int ccr_stat(struct ccr *ccr);
 
 struct ccr *ccr_open(char *ring, int flags, ...);
 int ccr_mapv(struct ccr *ccr, struct cc_map *map, int count);
-int ccr_getnext(struct ccr *ccr, int flags, ...);
+ssize_t ccr_getnext(struct ccr *ccr, int flags, ...);
 int ccr_capture(struct ccr *ccr);
 int ccr_close(struct ccr *ccr);
 int ccr_get_selectable_fd(struct ccr *ccr);

@@ -34,6 +34,7 @@ struct {
   UT_vector /* of struct ccr* */ *ccr;
   int block;
   int max;
+  int pretty;
   char *file;
 } cfg = {
   .signal_fd = -1,
@@ -117,7 +118,9 @@ int handle_stdin(void) {
 
   bc = read(STDIN_FILENO, &c, sizeof(c));
   if (bc <= 0) goto done;
-  if (c == 'q') goto done; /* quit */
+
+  if (c == 'q') goto done; /* quit */ 
+  else          goto done; /* right now, any key quits */
   rc = 0;
 
  done:
@@ -125,15 +128,18 @@ int handle_stdin(void) {
 }
 
 int handle_io(int i) {
-  int rc = -1;
+  int rc = -1, sc, fl;
   size_t len;
   char *out;
 
   struct ccr **ccr = utvector_elt(cfg.ccr, i);
   assert(ccr);
 
-  if (ccr_getnext(*ccr, CCR_BUFFER|CCR_JSON, &out, &len) < 0) goto done;
-  printf("%.*s\n", (int)len, out);
+  fl = CCR_BUFFER | CCR_JSON;
+  fl |= cfg.pretty ? CCR_PRETTY : 0;
+  sc = ccr_getnext(*ccr, fl, &out, &len);
+  if (sc < 0) goto done;
+  if (sc > 0) printf("%.*s\n", (int)len, out);
   rc = 0;
 
  done:
@@ -152,6 +158,7 @@ void usage() {
                  "-----------------\n"
                  "  -b [0|1]   block (default: 1; wait for data)\n"
                  "  -n <num>   max frames to read (default: 0; unlimited)\n"
+                 "  -p         pretty-print JSON (default: 0)\n"
                  "\n"
                  "create mode options\n"
                  "-------------------\n"
@@ -172,7 +179,7 @@ int is_ccr_fd(int fd, int *i) {
   fp=NULL;
   while ( (fp = (int*)utvector_next(cfg.fd, fp))) {
     if (*fp == fd) return 1;
-    *i++;
+    (*i)++;
   }
   return 0;
 }
@@ -190,9 +197,10 @@ int main(int argc, char *argv[]) {
   cfg.fd = utvector_new(utmm_int);
   cfg.ccr = utvector_new(&mm_ptr);
 
-  while ( (opt = getopt(argc,argv,"vhcs:qm:rb:f:gn:")) > 0) {
+  while ( (opt = getopt(argc,argv,"vhcs:qm:rb:f:gn:p")) > 0) {
     switch(opt) {
       case 'v': cfg.verbose++; break;
+      case 'p': cfg.pretty++; break;
       case 'h': default: usage(); break;
       case 'b': cfg.block = atoi(optarg); break;
       case 'n': cfg.max = atoi(optarg); break;
@@ -272,6 +280,7 @@ int main(int argc, char *argv[]) {
         fd = ccr_get_selectable_fd(ccr);
         if (fd < 0) goto done;
         utvector_push(cfg.fd, &fd);
+        setvbuf(stdout, NULL, _IONBF, 0);
         break;
 
       default: 
@@ -317,7 +326,7 @@ int main(int argc, char *argv[]) {
     if (new_epoll(EPOLLIN, *fp)) goto done;
   }
 
-  /* want keystrokes from terminal */
+  /* unbuffer keypresses from terminal */
   if (want_keys(1) < 0) goto done;
 
   /* kick off timer */

@@ -184,7 +184,10 @@ int ccr_capture(struct ccr *ccr) {
 }
 
 /*
- * read one frame
+ * ccr_getnext
+ *
+ * Read one frame from the ring.
+ * Block if ring empty, or return immediately in CCR_NONBLOCK mode.
  *
  * flags        varags                 description
  * -----       ---------------------   ---------------------
@@ -192,51 +195,62 @@ int ccr_capture(struct ccr *ccr) {
  * CCR_BUFFER|
  *  CCR_JSON   char**buf, size_t *len  get volatile json buffer
  *
+ * returns:
+ *   > 0 (number of bytes read from the ring)
+ *   0   (ring empty, in non-blocking mode)
+ *  -1   (error)
+ *  -2   (signal arrived while blocked waiting for ring)
+ *
  */
-int ccr_getnext(struct ccr *ccr, int flags, ...) {
-  int rc=-1, sc, jc;
+ssize_t ccr_getnext(struct ccr *ccr, int flags, ...) {
+  ssize_t rc = -1;
   char *buf, **out;
   size_t len, *out_len;
+  int fl = 0;
 
   va_list ap;
   va_start(ap, flags);
 
- again:
+  /* 'buffer' is the only mode right now */
+  if ((flags & CCR_BUFFER) == 0) goto done;
+  if (flags & CCR_PRETTY) fl |= CC_PRETTY;
+
+  /* get caller varargs */
+  out = va_arg(ap, char**);
+  out_len = va_arg(ap, size_t *);
+
+ again: /* in case we need to grow recv buffer */
+
+  /* use ccr->tmp internal buffer as a recv buf */
   buf = ccr->tmp->d;
   len = ccr->tmp->n;
-  sc = shr_read(ccr->shr, buf, len);
-  if (sc < 0) {
-    if (sc == -3) { 
-      /* need more room the buffer to receive the frame */
-      utstring_reserve(ccr->tmp, (len ? (len * 2) : 100));
-      goto again;
-    }
-    fprintf(stderr, "ccr_getnext: error %d\n", sc);
+  rc = shr_read(ccr->shr, buf, len);
+
+  /* double if need more room in recv buffer */
+  if (rc == -3) {
+    utstring_reserve(ccr->tmp, (len ? (len * 2) : 100));
+    goto again;
+  }
+
+  /* other error? */
+  if (rc < 0) {
+    fprintf(stderr, "ccr_getnext: error %ld\n", (long)rc);
     goto done;
   }
 
-  /* a reader in nonblocking mode can get a 0 (no data) */
-  if (sc == 0) {
-    rc = 0;
+  /* no data? (nonblock mode) */
+  if (rc == 0) goto done;
+
+  /* want json encoding? */
+  if (flags & CCR_JSON) {
+    if (cc_to_json(ccr->cc, out, out_len, buf, len, fl)) rc = -1;
+    /* on success, leave rc as is */
     goto done;
   }
 
-  /* obtained a frame. provide to caller in raw or json */
-  if (flags & CCR_BUFFER) {
-    out = va_arg(ap, char**);
-    out_len = va_arg(ap, size_t *);
-
-    if (flags & CCR_JSON) {
-      jc = cc_to_json(ccr->cc, out, out_len, buf, len, 0);
-      if (jc < 0) goto done;
-    } else {
-      *out = buf;
-      *out_len = sc;
-    }
-
-    rc = 0;
-  }
-
+  /* flat ccr buffer */
+  *out = buf;
+  *out_len = rc;
 
  done:
   va_end(ap);
