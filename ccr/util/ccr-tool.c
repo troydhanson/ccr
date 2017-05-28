@@ -1,11 +1,16 @@
+#include <sys/signalfd.h>
+#include <sys/epoll.h>
+#include <termios.h>
 #include <string.h>
-#include <time.h>
+#include <signal.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <time.h>
+#include "libut.h"
 #include "ccr.h"
 
 /* 
@@ -16,29 +21,140 @@
 struct {
   char *prog;
   int verbose;
+  int signal_fd;
+  int ticks;
+  struct timeval now;
+  int epoll_fd;
   char *ring;
   enum {mode_status, mode_getcast, mode_create, mode_read} mode;
-  struct ccr *ccr;
   struct shr *shr;
   size_t size;
   int flags;
+  UT_vector /* of int */ *fd;
+  UT_vector /* of struct ccr* */ *ccr;
   int block;
+  int max;
   char *file;
-} CF = {
+} cfg = {
+  .signal_fd = -1,
+  .epoll_fd = -1,
   .flags = CCR_KEEPEXIST | CCR_DROP,
+  .block = 1,
 };
+
+/* signals that we'll accept via signalfd in epoll */
+int sigs[] = {SIGHUP,SIGTERM,SIGINT,SIGQUIT,SIGALRM};
+
+int new_epoll(int events, int fd) {
+  int rc;
+  struct epoll_event ev;
+  memset(&ev,0,sizeof(ev)); // placate valgrind
+  ev.events = events;
+  ev.data.fd= fd;
+  if (cfg.verbose) fprintf(stderr,"adding fd %d to epoll\n", fd);
+  rc = epoll_ctl(cfg.epoll_fd, EPOLL_CTL_ADD, fd, &ev);
+  if (rc == -1) {
+    fprintf(stderr,"epoll_ctl: %s\n", strerror(errno));
+  }
+  return rc;
+}
+
+int handle_signal(void) {
+  int rc=-1;
+  struct signalfd_siginfo info;
+  
+  if (read(cfg.signal_fd, &info, sizeof(info)) != sizeof(info)) {
+    fprintf(stderr,"failed to read signal fd buffer\n");
+    goto done;
+  }
+
+  switch(info.ssi_signo) {
+    case SIGALRM: 
+      cfg.ticks++;
+      gettimeofday(&cfg.now, NULL);
+      alarm(1); 
+      break;
+    default: 
+      fprintf(stderr,"got signal %d\n", info.ssi_signo);  
+      goto done;
+      break;
+  }
+
+ rc = 0;
+
+ done:
+  return rc;
+}
+
+/* this toggles terminal settings so we read keystrokes on
+ * stdin immediately (by negating canon and echo flags). 
+ *
+ * Undo at exit, or user's terminal will appear dead!!
+ */
+int want_keys(int want_keystrokes) {
+  int rc = -1;
+  struct termios t;
+  if (tcgetattr(STDIN_FILENO, &t) < 0) {
+    fprintf(stderr,"tcgetattr: %s\n", strerror(errno));
+    goto done;
+  }
+
+  if (want_keystrokes) t.c_lflag &= ~(ICANON|ECHO);
+  else                 t.c_lflag |=  (ICANON|ECHO);
+
+  if (tcsetattr(STDIN_FILENO, TCSANOW, &t) < 0) {
+    fprintf(stderr,"tcsetattr: %s\n", strerror(errno));
+    goto done;
+  }
+  rc = 0;
+ done:
+  return rc;
+}
+
+int handle_stdin(void) {
+  int rc= -1, bc;
+  char c;
+
+  bc = read(STDIN_FILENO, &c, sizeof(c));
+  if (bc <= 0) goto done;
+  if (c == 'q') goto done; /* quit */
+  rc = 0;
+
+ done:
+  return rc;
+}
+
+int handle_io(int i) {
+  int rc = -1;
+  size_t len;
+  char *out;
+
+  struct ccr **ccr = utvector_elt(cfg.ccr, i);
+  assert(ccr);
+
+  if (ccr_getnext(*ccr, CCR_BUFFER|CCR_JSON, &out, &len) < 0) goto done;
+  printf("%.*s\n", (int)len, out);
+  rc = 0;
+
+ done:
+  return rc;
+}
 
 void usage() {
   fprintf(stderr,"usage: %s [options] <ring>\n"
                  "\n"
                  "[query stats ]: -q\n"
                  "[get cast    ]: -g\n"
-                 "[read frame  ]: -r\n"
+                 "[read frames ]: -r\n"
                  "[create/init ]: -c -s <size> -f <cast-file> [-m <mode>]\n"
+                 "\n"
+                 "read mode options\n"
+                 "-----------------\n"
+                 "  -b [0|1]   block (default: 1; wait for data)\n"
+                 "  -n <num>   max frames to read (default: 0; unlimited)\n"
                  "\n"
                  "create mode options\n"
                  "-------------------\n"
-                 "\n"
                  "  <size> in bytes with optional k/m/g/t suffix\n"
                  "  <cast-file> is the format of the items in ccr castfile format\n"
                  "  <mode> bits (default: dk)\n"
@@ -46,49 +162,66 @@ void usage() {
                  "         k  keep existing (if ring exists, leave as-is)\n"
                  "         o  overwrite     (if ring exists, re-create)\n"
                  "\n"
-                 "\n", CF.prog);
+                 "\n", cfg.prog);
   exit(-1);
 }
 
+int is_ccr_fd(int fd, int *i) {
+  int *fp;
+  *i = 0;
+  fp=NULL;
+  while ( (fp = (int*)utvector_next(cfg.fd, fp))) {
+    if (*fp == fd) return 1;
+    *i++;
+  }
+  return 0;
+}
+
 int main(int argc, char *argv[]) {
-  char unit, *c, buf[10000], *cast, *out;
-  struct ccr *ccr = NULL;
+  int opt, rc=-1, sc, n, ec, fd, i, *fp;
+  struct ccr *ccr = NULL, **r;
+  char unit, *c, *cast, *out;
+  struct epoll_event ev;
   size_t cast_len, len;
   struct shr_stat stat;
-  int opt, rc=-1, sc;
-  CF.prog = argv[0];
+  cfg.prog = argv[0];
 
-  while ( (opt = getopt(argc,argv,"vhcs:qm:rb:f:g")) > 0) {
+  UT_mm mm_ptr = {.sz = sizeof(void*) };
+  cfg.fd = utvector_new(utmm_int);
+  cfg.ccr = utvector_new(&mm_ptr);
+
+  while ( (opt = getopt(argc,argv,"vhcs:qm:rb:f:gn:")) > 0) {
     switch(opt) {
-      case 'v': CF.verbose++; break;
+      case 'v': cfg.verbose++; break;
       case 'h': default: usage(); break;
-      case 'b': CF.block = atoi(optarg); break;
-      case 'c': CF.mode=mode_create; break;
-      case 'q': CF.mode=mode_status; break;
-      case 'g': CF.mode=mode_getcast; break;
-      case 'r': CF.mode=mode_read; break;
-      case 'f': CF.file = strdup(optarg); break;
+      case 'b': cfg.block = atoi(optarg); break;
+      case 'n': cfg.max = atoi(optarg); break;
+      case 'c': cfg.mode=mode_create; break;
+      case 'q': cfg.mode=mode_status; break;
+      case 'g': cfg.mode=mode_getcast; break;
+      case 'r': cfg.mode=mode_read; break;
+      case 'f': cfg.file = strdup(optarg); break;
       case 's':  /* ring size */
-         sc = sscanf(optarg, "%ld%c", &CF.size, &unit);
+         sc = sscanf(optarg, "%ld%c", &cfg.size, &unit);
          if (sc == 0) usage();
          if (sc == 2) {
             switch (unit) {
-              case 't': case 'T': CF.size *= 1024; /* fall through */
-              case 'g': case 'G': CF.size *= 1024; /* fall through */
-              case 'm': case 'M': CF.size *= 1024; /* fall through */
-              case 'k': case 'K': CF.size *= 1024; break;
+              case 't': case 'T': cfg.size *= 1024; /* fall through */
+              case 'g': case 'G': cfg.size *= 1024; /* fall through */
+              case 'm': case 'M': cfg.size *= 1024; /* fall through */
+              case 'k': case 'K': cfg.size *= 1024; break;
               default: usage(); break;
             }
          }
          break;
       case 'm': /* ring mode */
-         CF.flags = 0; /* override default */
+         cfg.flags = 0; /* override default */
          c = optarg;
          while((*c) != '\0') {
            switch (*c) {
-             case 'd': CF.flags |= CCR_DROP; break;
-             case 'k': CF.flags |= CCR_KEEPEXIST; break;
-             case 'o': CF.flags |= CCR_OVERWRITE; break;
+             case 'd': cfg.flags |= CCR_DROP; break;
+             case 'k': cfg.flags |= CCR_KEEPEXIST; break;
+             case 'o': cfg.flags |= CCR_OVERWRITE; break;
              default: usage(); break;
            }
            c++;
@@ -100,47 +233,45 @@ int main(int argc, char *argv[]) {
   if (optind >= argc) usage();
 
   while(optind < argc) {
-    CF.ring = argv[optind++];
+    cfg.ring = argv[optind++];
   
-    switch(CF.mode) {
+    switch(cfg.mode) {
 
       case mode_create:
-        if (CF.size == 0) usage();
-        if (CF.file == NULL) usage();
-        rc = ccr_init(CF.ring, CF.size, CF.flags | CCR_CASTFILE, CF.file);
+        if (cfg.size == 0) usage();
+        if (cfg.file == NULL) usage();
+        rc = ccr_init(cfg.ring, cfg.size, cfg.flags | CCR_CASTFILE, cfg.file);
         if (rc < 0) goto done;
         break;
 
       case mode_status:
       case mode_getcast:
-        CF.shr = shr_open(CF.ring, SHR_RDONLY | SHR_GET_APPDATA, 
+        cfg.shr = shr_open(cfg.ring, SHR_RDONLY | SHR_GET_APPDATA, 
                           &cast, &cast_len);
-        if (CF.shr == NULL) goto done;
-        rc = shr_stat(CF.shr, &stat, NULL);
+        if (cfg.shr == NULL) goto done;
+        rc = shr_stat(cfg.shr, &stat, NULL);
         if (rc < 0) goto done;
-        if (CF.mode == mode_status) {
+        if (cfg.mode == mode_status) {
           printf("%s, frames-ready %ld,"
                " frames-written %ld,"
                " frames-read %ld,"
                " frames-dropped %ld,"
                " byte-capacity %ld\n",
-               CF.ring, stat.mu, stat.mw, stat.mr, stat.md, stat.bn);
+               cfg.ring, stat.mu, stat.mw, stat.mr, stat.md, stat.bn);
         }
-        if (CF.mode == mode_getcast) {
+        if (cfg.mode == mode_getcast) {
           printf("%.*s", (int)cast_len, cast);
         }
-        shr_close(CF.shr);
+        shr_close(cfg.shr);
         break;
 
       case mode_read:
-        ccr = ccr_open(CF.ring, CCR_RDONLY, 0);
+        ccr = ccr_open(cfg.ring, CCR_RDONLY|CCR_NONBLOCK, 0);
         if (ccr == NULL) goto done;
-        if (ccr_getnext(ccr, CCR_BUFFER|CCR_JSON, &out, &len) < 0) {
-          ccr_close(ccr);
-          goto done;
-        }
-        printf("%.*s\n", (int)len, out);
-        ccr_close(ccr);
+        utvector_push(cfg.ccr, &ccr);
+        fd = ccr_get_selectable_fd(ccr);
+        if (fd < 0) goto done;
+        utvector_push(cfg.fd, &fd);
         break;
 
       default: 
@@ -149,9 +280,72 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  /* one-shot modes are done. */
+  if (utvector_len(cfg.fd) == 0) {
+    rc = 0;
+    goto done;
+  }
+
+  /* block signals. we accept signals in signalfd */
+  sigset_t all;
+  sigfillset(&all);
+  sigprocmask(SIG_SETMASK,&all,NULL);
+
+  /* a few signals we'll accept via our signalfd */
+  sigset_t sw;
+  sigemptyset(&sw);
+  for(n=0; n < sizeof(sigs)/sizeof(*sigs); n++) sigaddset(&sw, sigs[n]);
+
+  /* create the signalfd for receiving signals */
+  cfg.signal_fd = signalfd(-1, &sw, 0);
+  if (cfg.signal_fd == -1) {
+    fprintf(stderr,"signalfd: %s\n", strerror(errno));
+    goto done;
+  }
+  /* set up the epoll instance */
+  cfg.epoll_fd = epoll_create(1); 
+  if (cfg.epoll_fd == -1) {
+    fprintf(stderr,"epoll: %s\n", strerror(errno));
+    goto done;
+  }
+
+  /* add descriptors of interest */
+  if (new_epoll(EPOLLIN, cfg.signal_fd)) goto done;
+  if (new_epoll(EPOLLIN, STDIN_FILENO)) goto done;
+  fp=NULL;
+  while ( (fp = (int*)utvector_next(cfg.fd, fp))) {
+    if (new_epoll(EPOLLIN, *fp)) goto done;
+  }
+
+  /* want keystrokes from terminal */
+  if (want_keys(1) < 0) goto done;
+
+  /* kick off timer */
+  alarm(1);
+
+  do { 
+    ec = epoll_wait(cfg.epoll_fd, &ev, 1, -1);
+    if      (ec < 0)  fprintf(stderr, "epoll: %s\n", strerror(errno));
+    else if (ec == 0) { assert(0); }
+    else if (ev.data.fd == cfg.signal_fd) { if (handle_signal() < 0) goto done;}
+    else if (ev.data.fd == STDIN_FILENO)  { if (handle_stdin()  < 0) goto done;}
+    else if (is_ccr_fd(ev.data.fd, &i))   { if (handle_io(i)    < 0) goto done;}
+    else { assert(0); }
+  } while (ec >= 0);
+
+
   rc = 0;
  
  done:
-  if (CF.file) free(CF.file);
+  if (cfg.signal_fd != -1) close(cfg.signal_fd);
+  if (cfg.epoll_fd != -1) close(cfg.epoll_fd);
+  if (cfg.file) free(cfg.file);
+  r=NULL;
+  while ( (r = (struct ccr**)utvector_next(cfg.ccr, r))) {
+    ccr_close(*r);
+  }
+  utvector_free(cfg.ccr);
+  utvector_free(cfg.fd); /* each fd closed in ccr_close */
+  want_keys(0);
   return 0;
 }
