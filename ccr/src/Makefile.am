@@ -1,9 +1,10 @@
 srcdir = @srcdir@
 
-lib_LIBRARIES = libccr.a
+lib_LTLIBRARIES = libccr.la
 
-libccr_a_CFLAGS = -Wall -Wextra
-libccr_a_CPPFLAGS = -I$(srcdir)/../../lib/libut/include -I$(srcdir)/../../cc
-libccr_a_LIBADD = ../../cc/libcc_a-cc.o  ../../cc/libcc_a-cc_types.o ../../lib/libut_build/libut/src/libut_a-libut.o  ../../lib/libut_build/libut/src/libut_a-ringbuf.o  ../../lib/libut_build/libut/src/libut_a-utmm.o  ../../lib/libut_build/libut/src/libut_a-utvector.o
-libccr_a_SOURCES = ccr.c 
+libccr_la_CFLAGS = -Wall -Wextra
+libccr_la_CPPFLAGS = -I$(srcdir)/../../lib/libut/include -I$(srcdir)/../../cc
+libccr_la_LIBADD = ../../cc/libcc.la
+libccr_la_SOURCES = ccr.c 
+libccr_la_LDFLAGS = -version-info 0:0:0
 pkginclude_HEADERS = ccr.h

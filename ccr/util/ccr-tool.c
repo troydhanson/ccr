@@ -6,12 +6,14 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <dlfcn.h>
 #include <stdio.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <time.h>
 #include "libut.h"
 #include "ccr.h"
+#include "modccr.h"
 
 /* 
  * ccr test tool
@@ -26,7 +28,7 @@ struct {
   struct timeval now;
   int epoll_fd;
   char *ring;
-  enum {mode_status, mode_getcast, mode_create, mode_read} mode;
+  enum {mode_status, mode_getcast, mode_create, mode_read, mode_lib} mode;
   struct shr *shr;
   size_t size;
   int flags;
@@ -36,6 +38,12 @@ struct {
   int max;
   int pretty;
   char *file;
+  /* mode_lib state */
+  char *lib;
+  char *libopts;
+  void *dl;
+  int (*libinit)(struct modccr *);
+  struct modccr modccr;
 } cfg = {
   .signal_fd = -1,
   .epoll_fd = -1,
@@ -73,6 +81,15 @@ int handle_signal(void) {
     case SIGALRM: 
       cfg.ticks++;
       gettimeofday(&cfg.now, NULL);
+
+      /* in module mode, run the module's periodic function */
+      if ((cfg.mode == mode_lib) && cfg.modccr.mod_periodic) {
+        if (cfg.modccr.mod_periodic(&cfg.modccr) < 0) {
+          fprintf(stderr, "module %s: shutdown\n", cfg.lib);
+          goto done;
+        }
+      }
+
       alarm(1); 
       break;
     default: 
@@ -95,6 +112,9 @@ int handle_signal(void) {
 int want_keys(int want_keystrokes) {
   int rc = -1;
   struct termios t;
+
+  if (isatty(STDIN_FILENO) == 0) return 0;
+
   if (tcgetattr(STDIN_FILENO, &t) < 0) {
     fprintf(stderr,"tcgetattr: %s\n", strerror(errno));
     goto done;
@@ -135,11 +155,30 @@ int handle_io(int i) {
   struct ccr **ccr = utvector_elt(cfg.ccr, i);
   assert(ccr);
 
-  fl = CCR_BUFFER | CCR_JSON;
-  fl |= cfg.pretty ? CCR_PRETTY : 0;
-  sc = ccr_getnext(*ccr, fl, &out, &len);
-  if (sc < 0) goto done;
-  if (sc > 0) printf("%.*s\n", (int)len, out);
+  switch (cfg.mode) {
+
+    case mode_read:
+      fl = CCR_BUFFER | CCR_JSON;
+      fl |= cfg.pretty ? CCR_PRETTY : 0;
+      sc = ccr_getnext(*ccr, fl, &out, &len);
+      if (sc < 0) goto done;
+      if (sc > 0) printf("%.*s\n", (int)len, out);
+      break;
+
+    case mode_lib:
+      if (cfg.modccr.mod_work == NULL) goto done;
+      if (cfg.modccr.mod_work(&cfg.modccr, *ccr) < 0) {
+        fprintf(stderr,"module %s: exit\n", cfg.lib);
+        goto done;
+      }
+      break;
+
+    default:
+      assert(0);
+      goto done;
+      break;
+  }
+
   rc = 0;
 
  done:
@@ -152,6 +191,7 @@ void usage() {
                  "[query stats ]: -q\n"
                  "[get cast    ]: -g\n"
                  "[read frames ]: -r\n"
+                 "[load module ]: -l <module> [-o <module-options>]\n"
                  "[create/init ]: -c -s <size> -f <cast-file> [-m <mode>]\n"
                  "\n"
                  "read mode options\n"
@@ -171,6 +211,40 @@ void usage() {
                  "\n"
                  "\n", cfg.prog);
   exit(-1);
+}
+
+int load_module(void) {
+  int rc = -1;
+
+  if (cfg.mode != mode_lib) {
+    rc = 0;
+    goto done;
+  }
+    
+  cfg.dl = dlopen(cfg.lib, RTLD_LAZY);
+  if (cfg.dl == NULL) {
+    fprintf(stderr, "%s\n", dlerror());
+    goto done;
+  }
+
+  cfg.libinit = dlsym(cfg.dl, "ccr_module_init");
+  if (cfg.libinit == NULL) {
+    fprintf(stderr, "%s\n", dlerror());
+    goto done;
+  }
+
+  cfg.modccr.verbose = cfg.verbose;
+  cfg.modccr.opts = cfg.libopts;
+
+  if (cfg.libinit(&cfg.modccr) < 0) {
+    fprintf(stderr, "%s: module init failed\n", cfg.lib);
+    goto done;
+  }
+
+  rc = 0;
+
+ done:
+  return rc;
 }
 
 int is_ccr_fd(int fd, int *i) {
@@ -197,7 +271,7 @@ int main(int argc, char *argv[]) {
   cfg.fd = utvector_new(utmm_int);
   cfg.ccr = utvector_new(&mm_ptr);
 
-  while ( (opt = getopt(argc,argv,"vhcs:qm:rb:f:gn:p")) > 0) {
+  while ( (opt = getopt(argc,argv,"vhcs:qm:rb:f:gn:pl:o:")) > 0) {
     switch(opt) {
       case 'v': cfg.verbose++; break;
       case 'p': cfg.pretty++; break;
@@ -209,6 +283,10 @@ int main(int argc, char *argv[]) {
       case 'g': cfg.mode=mode_getcast; break;
       case 'r': cfg.mode=mode_read; break;
       case 'f': cfg.file = strdup(optarg); break;
+      case 'l': cfg.mode = mode_lib;
+                cfg.lib = strdup(optarg);
+                break;
+      case 'o': cfg.libopts = strdup(optarg); break;
       case 's':  /* ring size */
          sc = sscanf(optarg, "%ld%c", &cfg.size, &unit);
          if (sc == 0) usage();
@@ -274,6 +352,10 @@ int main(int argc, char *argv[]) {
         break;
 
       case mode_read:
+        /* unbuffer keypresses from terminal */
+        if (want_keys(1) < 0) goto done;
+        /* FALLTHRU */
+      case mode_lib:
         ccr = ccr_open(cfg.ring, CCR_RDONLY|CCR_NONBLOCK, 0);
         if (ccr == NULL) goto done;
         utvector_push(cfg.ccr, &ccr);
@@ -320,14 +402,16 @@ int main(int argc, char *argv[]) {
 
   /* add descriptors of interest */
   if (new_epoll(EPOLLIN, cfg.signal_fd)) goto done;
-  if (new_epoll(EPOLLIN, STDIN_FILENO)) goto done;
+  if (cfg.mode == mode_read) {
+    if (new_epoll(EPOLLIN, STDIN_FILENO)) goto done;
+  }
   fp=NULL;
   while ( (fp = (int*)utvector_next(cfg.fd, fp))) {
     if (new_epoll(EPOLLIN, *fp)) goto done;
   }
 
-  /* unbuffer keypresses from terminal */
-  if (want_keys(1) < 0) goto done;
+  /* load module, if any */
+  if (load_module() < 0) goto done;
 
   /* kick off timer */
   alarm(1);
@@ -349,12 +433,16 @@ int main(int argc, char *argv[]) {
   if (cfg.signal_fd != -1) close(cfg.signal_fd);
   if (cfg.epoll_fd != -1) close(cfg.epoll_fd);
   if (cfg.file) free(cfg.file);
+  /* module cleanup */
+  if (cfg.dl && cfg.modccr.mod_fini) cfg.modccr.mod_fini(&cfg.modccr);
+  if (cfg.lib) free(cfg.lib);
+  if (cfg.libopts) free(cfg.libopts);
+  if (cfg.dl) dlclose(cfg.dl);
+  /* ring cleanup */
   r=NULL;
-  while ( (r = (struct ccr**)utvector_next(cfg.ccr, r))) {
-    ccr_close(*r);
-  }
+  while ( (r = (struct ccr**)utvector_next(cfg.ccr, r))) ccr_close(*r);
   utvector_free(cfg.ccr);
   utvector_free(cfg.fd); /* each fd closed in ccr_close */
-  want_keys(0);
+  want_keys(0); /* restore terminal */
   return 0;
 }

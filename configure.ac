@@ -1,10 +1,11 @@
 AC_INIT([ccr], 1.0)
+AC_CONFIG_MACRO_DIRS([m4])
 AM_INIT_AUTOMAKE([foreign subdir-objects])
 m4_ifdef([AM_SILENT_RULES],
     [AM_SILENT_RULES([yes])
     ])
+LT_INIT([shared])
 AC_PROG_CC
-AC_PROG_RANLIB
 
 have_shr_header=n
 have_shr_lib=n
