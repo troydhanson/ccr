@@ -2,7 +2,7 @@
 #ifndef CCR_MODULE_H
 #define CCR_MODULE_H
 
-#include "ccr/ccr.h"
+#include "ccr.h"
 
 struct modccr {
   int verbose;
