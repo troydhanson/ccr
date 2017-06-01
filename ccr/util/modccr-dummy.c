@@ -18,7 +18,7 @@ static int mod_work(struct modccr *m, struct ccr *ccr) {
 
   if (m->verbose) fprintf(stderr, "mod_work\n");
 
-  fl = CCR_BUFFER | CCR_JSON; // | CCR_PRETTY;
+  fl = CCR_BUFFER | CCR_JSON | CCR_PRETTY;
   sc = ccr_getnext(ccr, fl, &out, &len);
   if (sc < 0) goto done;
   if (sc > 0) printf("%.*s\n", (int)len, out);
@@ -27,6 +27,10 @@ static int mod_work(struct modccr *m, struct ccr *ccr) {
 
  done:
   return rc;
+}
+
+void mod_usage(void) {
+  fprintf(stderr, "no options\n");
 }
 
 int ccr_module_init(struct modccr *m) {
