@@ -63,8 +63,30 @@ UT_mm const cc_mm = {
   .clear = cc_clear,
 };
 
+static int xcpf_i16_u16(UT_string *d, void *p) {
+  utstring_bincpy(d, p, sizeof(int16_t));
+  return 0;
+}
+
+static int xcpf_u16_u16(UT_string *d, void *p) {
+  utstring_bincpy(d, p, sizeof(uint16_t));
+  return 0;
+}
+
+static int xcpf_u16_i16(UT_string *d, void *p) {
+  utstring_bincpy(d, p, sizeof(int16_t));
+  return 0;
+}
+
 static int xcpf_i16_i16(UT_string *d, void *p) {
   utstring_bincpy(d, p, sizeof(int16_t));
+  return 0;
+}
+
+static int xcpf_u16_i32(UT_string *d, void *p) {
+  uint16_t u16 = *(uint16_t*)p;
+  int32_t i32 = u16;
+  utstring_bincpy(d, &i32, sizeof(i32));
   return 0;
 }
 
@@ -72,6 +94,17 @@ static int xcpf_i16_i32(UT_string *d, void *p) {
   int16_t i16 = *(int16_t*)p;
   int32_t i32 = i16;
   utstring_bincpy(d, &i32, sizeof(i32));
+  return 0;
+}
+
+static int xcpf_u16_str(UT_string *d, void *p) {
+  uint16_t u16 = *(uint16_t*)p;
+  unsigned u = u16;
+  char s[10];
+  snprintf(s, sizeof(s), "%u", u);
+  uint32_t l = strlen(s);
+  utstring_bincpy(d, &l, sizeof(l));
+  utstring_bincpy(d, s, l);
   return 0;
 }
 
@@ -83,6 +116,13 @@ static int xcpf_i16_str(UT_string *d, void *p) {
   uint32_t l = strlen(s);
   utstring_bincpy(d, &l, sizeof(l));
   utstring_bincpy(d, s, l);
+  return 0;
+}
+
+static int xcpf_u16_d64(UT_string *d, void *p) {
+  uint16_t u16 = *(uint16_t*)p;
+  double f = u16;
+  utstring_bincpy(d, &f, sizeof(f));
   return 0;
 }
 
@@ -144,6 +184,15 @@ static int xcpf_ipv4_str(UT_string *d, void *p) {
   uint32_t l = strlen(s);
   utstring_bincpy(d, &l, sizeof(l));
   utstring_bincpy(d, s, l);
+  return 0;
+}
+
+static int xcpf_str_u16(UT_string *d, void *p) {
+  char **c = (char **)p;
+  unsigned u;
+  if (sscanf(*c, "%u", &u) != 1) return -1;
+  uint16_t u16 = u; // may truncate
+  utstring_bincpy(d, &u16, sizeof(u16));
   return 0;
 }
 
@@ -211,6 +260,13 @@ static int xcpf_str_mac(UT_string *d, void *p) {
   return 0;
 }
 
+static int xcpf_i8_u16(UT_string *d, void *p) {
+  int8_t i8 = *(int8_t*)p;
+  uint16_t u16 = i8;
+  utstring_bincpy(d, &u16, sizeof(u16));
+  return 0;
+}
+
 static int xcpf_i8_i16(UT_string *d, void *p) {
   int8_t i8 = *(int8_t*)p;
   int16_t i16 = i8;
@@ -245,6 +301,13 @@ static int xcpf_i8_d64(UT_string *d, void *p) {
   int8_t i8 = *(int8_t*)p;
   double f = i8;
   utstring_bincpy(d, &f, sizeof(f));
+  return 0;
+}
+
+static int xcpf_d64_u16(UT_string *d, void *p) {
+  double f = *(double*)p;
+  uint16_t u16 = f;
+  utstring_bincpy(d, &u16, sizeof(u16));
   return 0;
 }
 
@@ -303,6 +366,7 @@ static int xcpf_mac_mac(UT_string *d, void *p) {
 
 
 xcpf cc_conversions[/*from*/NUM_TYPES][/*to*/NUM_TYPES] = {
+  [CC_i16][CC_u16] = xcpf_i16_u16,
   [CC_i16][CC_i16] = xcpf_i16_i16,
   [CC_i16][CC_i32] = xcpf_i16_i32,
   [CC_i16][CC_ipv4] = NULL,
@@ -311,6 +375,16 @@ xcpf cc_conversions[/*from*/NUM_TYPES][/*to*/NUM_TYPES] = {
   [CC_i16][CC_d64] = xcpf_i16_d64,
   [CC_i16][CC_mac] = NULL,
 
+  [CC_u16][CC_u16] = xcpf_u16_u16,
+  [CC_u16][CC_i16] = xcpf_u16_i16,
+  [CC_u16][CC_i32] = xcpf_u16_i32,
+  [CC_u16][CC_ipv4] = NULL,
+  [CC_u16][CC_str] = xcpf_u16_str,
+  [CC_u16][CC_i8] = NULL,
+  [CC_u16][CC_d64] = xcpf_u16_d64,
+  [CC_u16][CC_mac] = NULL,
+
+  [CC_i32][CC_u16] = NULL,
   [CC_i32][CC_i16] = NULL,
   [CC_i32][CC_i32] = xcpf_i32_i32,
   [CC_i32][CC_ipv4] = xcpf_i32_ipv4,
@@ -319,6 +393,7 @@ xcpf cc_conversions[/*from*/NUM_TYPES][/*to*/NUM_TYPES] = {
   [CC_i32][CC_d64] = xcpf_i32_d64,
   [CC_i32][CC_mac] = NULL,
 
+  [CC_ipv4][CC_u16] = NULL,
   [CC_ipv4][CC_i16] = NULL,
   [CC_ipv4][CC_i32] = xcpf_ipv4_i32,
   [CC_ipv4][CC_ipv4] = xcpf_ipv4_ipv4,
@@ -327,6 +402,7 @@ xcpf cc_conversions[/*from*/NUM_TYPES][/*to*/NUM_TYPES] = {
   [CC_ipv4][CC_d64] = NULL,
   [CC_ipv4][CC_mac] = NULL,
 
+  [CC_str][CC_u16] = xcpf_str_u16,
   [CC_str][CC_i16] = xcpf_str_i16,
   [CC_str][CC_i32] = xcpf_str_i32,
   [CC_str][CC_ipv4] = xcpf_str_ipv4,
@@ -335,6 +411,7 @@ xcpf cc_conversions[/*from*/NUM_TYPES][/*to*/NUM_TYPES] = {
   [CC_str][CC_d64] = xcpf_str_d64,
   [CC_str][CC_mac] = xcpf_str_mac,
 
+  [CC_i8][CC_u16] = xcpf_i8_u16,
   [CC_i8][CC_i16] = xcpf_i8_i16,
   [CC_i8][CC_i32] = xcpf_i8_i32,
   [CC_i8][CC_ipv4] = NULL,
@@ -343,6 +420,7 @@ xcpf cc_conversions[/*from*/NUM_TYPES][/*to*/NUM_TYPES] = {
   [CC_i8][CC_d64] = xcpf_i8_d64,
   [CC_i8][CC_mac] = NULL,
 
+  [CC_d64][CC_u16] = xcpf_d64_u16,
   [CC_d64][CC_i16] = xcpf_d64_i16,
   [CC_d64][CC_i32] = xcpf_d64_i32,
   [CC_d64][CC_ipv4] = NULL,
@@ -351,6 +429,7 @@ xcpf cc_conversions[/*from*/NUM_TYPES][/*to*/NUM_TYPES] = {
   [CC_d64][CC_d64] = xcpf_d64_d64,
   [CC_d64][CC_mac] = NULL,
 
+  [CC_mac][CC_u16] = NULL,
   [CC_mac][CC_i16] = NULL,
   [CC_mac][CC_i32] = NULL,
   [CC_mac][CC_ipv4] = NULL,
