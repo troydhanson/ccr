@@ -175,7 +175,7 @@ static int xcpf_ipv4_str(UT_string *d, void *p) {
   uint32_t u32 = *(uint32_t*)p;
   uint8_t ia, ib, ic, id;
   char s[20];
-  /* consider u32 to be in network order */
+  /* consider u32 as in network order; see also slot_to_json case CC_ipv4*/
   ia = (u32 & 0x000000ff) >>  0;
   ib = (u32 & 0x0000ff00) >>  8;
   ic = (u32 & 0x00ff0000) >> 16;
@@ -507,10 +507,11 @@ int slot_to_json(cc_type ot, char *from, size_t len, json_t **j) {
       l = sizeof(uint32_t);
       if (len < l) goto done;
       memcpy(&u32, from, l);
-      ia = (u32 & 0xff000000) >> 24;
-      ib = (u32 & 0x00ff0000) >> 16;
-      ic = (u32 & 0x0000ff00) >>  8;
-      id = (u32 & 0x000000ff) >>  0;
+      /* consider u32 as in network order; see also xcpf_ipv4_str*/
+      ia = (u32 & 0x000000ff) >>  0;
+      ib = (u32 & 0x0000ff00) >>  8;
+      ic = (u32 & 0x00ff0000) >> 16;
+      id = (u32 & 0xff000000) >> 24;
       snprintf(s, sizeof(s), "%d.%d.%d.%d", (int)ia, (int)ib, (int)ic, (int)id);
       *j = json_string(s);
       if (*j == NULL) goto done;
