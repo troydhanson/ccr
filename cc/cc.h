@@ -6,7 +6,7 @@
 #define CC_FILE         (1U << 2)
 #define CC_BUFFER       (1U << 3)
 
-#define TYPES x(i8) x(i16) x(i32) x(str) x(d64) x(ipv4) x(mac)
+#define TYPES x(i8) x(i16) x(u16) x(i32) x(str) x(d64) x(ipv4) x(mac)
 #define x(t) CC_ ## t,
 typedef enum { TYPES } cc_type;
 #undef x

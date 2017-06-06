@@ -135,10 +135,11 @@ static int xcpf_ipv4_str(UT_string *d, void *p) {
   uint32_t u32 = *(uint32_t*)p;
   uint8_t ia, ib, ic, id;
   char s[20];
-  ia = (u32 & 0xff000000) >> 24;
-  ib = (u32 & 0x00ff0000) >> 16;
-  ic = (u32 & 0x0000ff00) >>  8;
-  id = (u32 & 0x000000ff) >>  0;
+  /* consider u32 to be in network order */
+  ia = (u32 & 0x000000ff) >>  0;
+  ib = (u32 & 0x0000ff00) >>  8;
+  ic = (u32 & 0x00ff0000) >> 16;
+  id = (u32 & 0xff000000) >> 24;
   snprintf(s, sizeof(s), "%d.%d.%d.%d", (int)ia, (int)ib, (int)ic, (int)id);
   uint32_t l = strlen(s);
   utstring_bincpy(d, &l, sizeof(l));
@@ -286,8 +287,9 @@ static int xcpf_d64_d64(UT_string *d, void *p) {
 static int xcpf_mac_str(UT_string *d, void *p) {
   unsigned char *m = p;
   char s[20];
-  snprintf(s, sizeof(s), "%x:%x:%x:%x:%x:%x", (int)m[0], (int)m[1], (int)m[2],  
-                                          (int)m[3], (int)m[4], (int)m[5]);
+  snprintf(s, sizeof(s), "%.2x:%.2x:%.2x:%.2x:%.2x:%.2x",
+     (unsigned)m[0], (unsigned)m[1], (unsigned)m[2],  
+     (unsigned)m[3], (unsigned)m[4], (unsigned)m[5]);
   uint32_t l = strlen(s);
   utstring_bincpy(d, &l, sizeof(l));
   utstring_bincpy(d, s, l);
