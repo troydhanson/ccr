@@ -449,6 +449,7 @@ int slot_to_json(cc_type ot, char *from, size_t len, json_t **j) {
   int8_t i8;
   uint8_t ia, ib, ic, id;
   int16_t i16;
+  uint16_t u16;
   int32_t i32;
   uint32_t u32;
   char s[20];
@@ -461,6 +462,13 @@ int slot_to_json(cc_type ot, char *from, size_t len, json_t **j) {
       if (len < l) goto done;
       memcpy(&i8, from, l);
       *j = json_integer(i8);
+      if (*j == NULL) goto done;
+      break;
+    case CC_u16:
+      l = sizeof(uint16_t);
+      if (len < l) goto done;
+      memcpy(&u16, from, l);
+      *j = json_integer(u16);
       if (*j == NULL) goto done;
       break;
     case CC_i16:
