@@ -402,7 +402,7 @@ int main(int argc, char *argv[]) {
 
   /* add descriptors of interest */
   if (new_epoll(EPOLLIN, cfg.signal_fd)) goto done;
-  if (cfg.mode == mode_read) {
+  if ((cfg.mode == mode_read) && isatty(STDIN_FILENO)) {
     if (new_epoll(EPOLLIN, STDIN_FILENO)) goto done;
   }
   fp=NULL;
