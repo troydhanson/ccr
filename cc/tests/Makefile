@@ -1,10 +1,16 @@
-PROGS=test1 test2 test3 test4 test5
+PROGS=test1 test2 test3 test4 test5 test6
 OBJS=$(patsubst %,%.o,$(PROGS))
 
 CFLAGS = -I.. -I../../libut/include
 CFLAGS += -g -O0
 CFLAGS += -Wall -Wextra
-LDFLAGS=-L.. -lcc -L../../lib/libut_build -lut -ljansson
+
+ifeq ($(OPT),1)
+EXTRA_LDFLAGS = -L/opt/lib
+endif
+
+LDFLAGS = -L.. -lcc -L../../lib/libut_build -lut
+LDFLAGS += $(EXTRA_LDFLAGS) -ljansson
 
 TEST_TARGET=run_tests
 TESTS=./do_tests
@@ -13,12 +19,16 @@ all: $(OBJS) $(PROGS) $(TEST_TARGET)
 
 # static pattern rule: multiple targets 
 
-$(OBJS): %.o: %.c
+$(OBJS): %.o: %.c ../libcc.la
 	$(CC) -o $@ -c $(CFLAGS) $< 
 
-$(PROGS): %: %.o
-	$(CC) -o $@ $(CFLAGS) $< $(LDFLAGS)
 
+# use libtool to link the tests. the tests link with
+# libcc.la and libut.la, both libtool (pre-installed)
+# libraries. (in fact they never get installed). only
+# libtool can properly link .la libs to an executable.
+$(PROGS): %: %.o
+	libtool --mode=link --tag=CC $(CC) -o $@ $< $(LDFLAGS)
 
 run_tests: $(PROGS)
 	perl $(TESTS)

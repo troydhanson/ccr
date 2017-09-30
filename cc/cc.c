@@ -183,12 +183,22 @@ static int get_index(struct cc *cc, char *name) {
   return s ? i : -1;
 }
 
+static void cc_mapv_clear(struct cc *cc)
+{
+  void **mp = NULL;
+  while ( (mp = utvector_next(&cc->caller_addrs, mp))) {
+    *mp = NULL;
+  }
+}
+
 /* associate pointers into caller memory with cc fields */
 int cc_mapv(struct cc *cc, struct cc_map *map, int count) {
   int rc=-1, i, n, nmapped=0;
   struct cc_map *m;
   cc_type *ot, *ct;
   void **mp;
+
+  cc_mapv_clear(cc);
 
   for(n=0; n < count; n++) {
 
