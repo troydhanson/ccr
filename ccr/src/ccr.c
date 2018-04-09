@@ -15,6 +15,7 @@ struct ccr {
   struct cc *cc;
   UT_string *tmp;
   int flags;
+  struct cc_map *dissect_map;
 };
 
 static int slurp(char *file, char **text, size_t *len) {
@@ -62,6 +63,42 @@ static int slurp(char *file, char **text, size_t *len) {
   return rc;
 }
 
+/*
+ * get_format
+ *
+ * copies (using malloc) the format text from given ccr ring
+ * caller must free eventually
+ *
+ * returns
+ *   0 success (and fills in text and len)
+ *  -1 error
+ *
+ * returns
+ */
+static int get_format(char *file, char **text, size_t *len) {
+  struct shr *s = NULL;
+  int rc=-1, sc;
+
+  *text=NULL;
+  *len = 0;
+
+  s = shr_open(file, SHR_RDONLY);
+  if (s == NULL) goto done;
+
+  sc = shr_appdata(s, (void**)text, NULL, len);
+  if (sc < 0) {
+    fprintf(stderr,"ccr_open: text not found\n");
+    goto done;
+  }
+
+  assert(*text && *len);
+  rc = 0;
+
+ done:
+  if (s) shr_close(s);
+  return rc;
+}
+
 static int validate_text(char *text, size_t len) {
   struct cc *cc;
   int rc = -1;
@@ -78,40 +115,59 @@ static int validate_text(char *text, size_t len) {
 }
 
 int ccr_init(char *ring, size_t sz, int flags, ...) {
-  int shr_flags = 0, rc = -1;
+  int shr_flags, rc = -1, sc, need_free=0;
   char *file, *text = NULL;
   size_t len = 0;
   
   va_list ap;
   va_start(ap, flags);
 
-  shr_flags |= SHR_MESSAGES;
-  shr_flags |= SHR_APPDATA;
-  if (flags & CCR_DROP)      shr_flags |= SHR_DROP;
+  shr_flags = SHR_APPDATA;
   if (flags & CCR_KEEPEXIST) shr_flags |= SHR_KEEPEXIST;
-  if (flags & CCR_OVERWRITE) shr_flags |= SHR_OVERWRITE;
+  if (flags & CCR_DROP)      shr_flags |= SHR_DROP;
+  if (flags & CCR_FARM)      shr_flags |= SHR_FARM;
+
+  if (((flags & CCR_CASTFILE) == 0) &&
+      ((flags & CCR_CASTCOPY) == 0) &&
+      ((flags & CCR_CASTTEXT) == 0)) {
+    /* TODO confirm only one of them set */
+    fprintf(stderr,"ccr_init: invalid flags\n");
+    goto done;
+  }
 
   if (flags & CCR_CASTFILE) {
     file = va_arg(ap, char*);
-    if (slurp(file, &text, &len) < 0) goto done;
+    sc = slurp(file, &text, &len);
+    if (sc < 0) goto done;
+    need_free=1;
   }
 
-  /* eventually add other flags to set text */
-  if ((flags & CCR_CASTFILE) == 0) goto done;
+  if (flags & CCR_CASTCOPY) {
+    file = va_arg(ap, char*);
+    sc = get_format(file, &text, &len);
+    if (sc < 0) goto done;
+    need_free=1;
+  }
 
+  if (flags & CCR_CASTTEXT) {
+    text = va_arg(ap, char*);
+    len = va_arg(ap, size_t);
+  }
+
+  assert(text && len);
   if (validate_text(text, len) < 0) goto done;
   rc = shr_init(ring, sz, shr_flags, text, len);
 
  done:
-  if (text) free(text);
+  if (text && need_free) free(text);
   va_end(ap);
   return rc;
 }
 
 struct ccr *ccr_open(char *ring, int flags, ...) {
-  int rc=-1, shr_mode=0;
+  int sc, rc=-1, shr_mode=0;
   struct ccr *ccr=NULL;
-  char *text;
+  char *text=NULL;
   size_t len;
 
   /* must be least R or W, and not both */
@@ -123,7 +179,7 @@ struct ccr *ccr_open(char *ring, int flags, ...) {
   if (flags & CCR_RDONLY)   shr_mode |= SHR_RDONLY;
   if (flags & CCR_NONBLOCK) shr_mode |= SHR_NONBLOCK;
   if (flags & CCR_WRONLY)   shr_mode |= SHR_WRONLY;
-  shr_mode |= SHR_GET_APPDATA;
+  if (flags & CCR_BUFFER)   shr_mode |= SHR_BUFFERED;
 
   ccr = calloc(1, sizeof(*ccr));
   if (ccr == NULL) {
@@ -131,11 +187,19 @@ struct ccr *ccr_open(char *ring, int flags, ...) {
     goto done;
   }
 
-  /* open the ring, pull the cc text from appdata */
-  ccr->shr = shr_open(ring, shr_mode, &text, &len);
+  ccr->shr = shr_open(ring, shr_mode);
   if (ccr->shr == NULL) goto done;
+
+  sc = shr_appdata(ccr->shr, (void**)&text, NULL, &len);
+  if (sc < 0) {
+    fprintf(stderr,"ccr_open: text not found\n");
+    goto done;
+  }
+
+  assert(text && len);
   ccr->cc = cc_open(text, CC_BUFFER, len);
   if (ccr->cc == NULL) goto done;
+
   utstring_new(ccr->tmp);
   ccr->flags = flags;
   rc = 0;
@@ -148,6 +212,7 @@ struct ccr *ccr_open(char *ring, int flags, ...) {
     if (ccr) free(ccr);
     ccr = NULL;
   }
+  if (text) free(text);
   return ccr;
 }
 
@@ -195,25 +260,31 @@ int ccr_capture(struct ccr *ccr) {
  * CCR_BUFFER|
  *  CCR_JSON   char**buf, size_t *len  get volatile json buffer
  *
+ * if CCR_JSON is specified, CCR_PRETTY and CCR_NEWLINE may be
+ * OR'd to pretty-print the JSON and append a newline respectively.
+ *
+ * CCR_LEN4FIRST can be OR'd to get the buffer prepended with a 
+ * 4-byte native endian length prefix. (not supported in CCR_JSON)
+ *
  * returns:
- *   > 0 (number of bytes read from the ring)
+ *   > 0 (success; data was read from ring)
  *   0   (ring empty, in non-blocking mode)
  *  -1   (error)
- *  -2   (signal arrived while blocked waiting for ring)
  *
  */
 ssize_t ccr_getnext(struct ccr *ccr, int flags, ...) {
-  ssize_t rc = -1;
+  ssize_t nr = -1;
   char *buf, **out;
-  size_t len, *out_len;
-  int fl = 0;
+  size_t avail, *out_len;
+  int fl = 0, sc;
 
   va_list ap;
   va_start(ap, flags);
 
   /* 'buffer' is the only mode right now */
   if ((flags & CCR_BUFFER) == 0) goto done;
-  if (flags & CCR_PRETTY) fl |= CC_PRETTY;
+  if (flags & CCR_PRETTY)  fl |= CC_PRETTY;
+  if (flags & CCR_NEWLINE) fl |= CC_NEWLINE;
 
   /* get caller varargs */
   out = va_arg(ap, char**);
@@ -222,39 +293,51 @@ ssize_t ccr_getnext(struct ccr *ccr, int flags, ...) {
  again: /* in case we need to grow recv buffer */
 
   /* use ccr->tmp internal buffer as a recv buf */
-  buf = ccr->tmp->d;
-  len = ccr->tmp->n;
-  rc = shr_read(ccr->shr, buf, len);
+  assert(ccr->tmp->n > sizeof(uint32_t));
+  buf = ccr->tmp->d + sizeof(uint32_t);
+  avail = ccr->tmp->n - sizeof(uint32_t);
+  nr = shr_read(ccr->shr, buf, avail);
 
   /* double if need more room in recv buffer */
-  if (rc == -3) {
-    utstring_reserve(ccr->tmp, (len ? (len * 2) : 100));
+  if (nr == -2) {
+    utstring_reserve(ccr->tmp, (avail ? (avail * 2) : 100));
     goto again;
   }
 
   /* other error? */
-  if (rc < 0) {
-    fprintf(stderr, "ccr_getnext: error %ld\n", (long)rc);
+  if (nr < 0) {
+    fprintf(stderr, "ccr_getnext: error %zd\n", nr);
     goto done;
   }
 
   /* no data? (nonblock mode) */
-  if (rc == 0) goto done;
+  if (nr == 0) goto done;
 
   /* want json encoding? */
   if (flags & CCR_JSON) {
-    if (cc_to_json(ccr->cc, out, out_len, buf, len, fl)) rc = -1;
-    /* on success, leave rc as is */
-    goto done;
+    sc = cc_to_json(ccr->cc, out, out_len, buf, nr, fl);
+    if (sc < 0) nr = -1;
+    goto done; /* on either success or error */
+  }
+  else if (flags & CCR_LEN4FIRST) {
+    if (nr > UINT32_MAX) {
+      fprintf(stderr, "frame exceeds 32-bit length\n");
+      goto done;
+    }
+    uint32_t len32 = (uint32_t)nr;
+    assert(buf == (ccr->tmp->d + sizeof(uint32_t)));
+    buf = ccr->tmp->d;
+    memcpy(buf, &len32, sizeof(len32));
+    nr += sizeof(len32);
   }
 
   /* flat ccr buffer */
   *out = buf;
-  *out_len = rc;
+  *out_len = nr;
 
  done:
   va_end(ap);
-  return rc;
+  return nr;
 }
 
 int ccr_get_selectable_fd(struct ccr *ccr) {
@@ -270,3 +353,58 @@ int ccr_get_selectable_fd(struct ccr *ccr) {
  done:
   return (rc < 0) ? rc : fd;
 }
+
+/*
+ * ccr_flush
+ *
+ * flush buffered data (in CCR_WRONLY|CCR_BUFFER mode)
+ *
+ * NOTE
+ *  for a ccr ring in CCR_NONBLOCK mode, this may return 0
+ *  if the ring is too full to accept the buffered data
+ *
+ * wait parameter:
+ *  if non-zero, causes a blocking flush. this only matters
+ *  if the ccr open mode was CCR_NONBLOCK.
+ *
+ * returns
+ * >= 0 bytes written
+ *  < 0 error
+ */ 
+ssize_t ccr_flush(struct ccr *ccr, int wait) {
+  ssize_t nr;
+
+  nr = shr_flush(ccr->shr, wait);
+  return nr;
+}
+
+/*
+ * ccr_dissect
+ *
+ * given a flat cc image (from a ccr_getnext)
+ * dissect the buffer into its fields. this 
+ * function populates a cc_map[] and stores its
+ * pointer into the map output parameter, of
+ * *count elements, occupying a volatile 
+ * buffer in the ccr structure. it will be 
+ * overwritten on the next call to ccr_dissect.
+ *
+ * the map contains elements of the form,
+ *
+ *   map[n].name  - C string with field name
+ *   map[n].addr  - pointer into input buffer
+ *   map[n].type  - CC_i8, CC_i16, etc field type
+ *
+ * returns
+ *   0 success
+ *  -1 error
+ *
+ */
+int ccr_dissect(struct ccr *ccr, struct cc_map **map, int *count,
+       char *in, size_t in_len, int flags) {
+  int sc;
+
+  sc = cc_dissect(ccr->cc, map, count, in, in_len, flags);
+  return sc;
+}
+

@@ -1,4 +1,4 @@
-#include "modccr.h"
+#include "ccr.h"
 
 /* function called at 1 hz from ccr-tool */
 static int mod_periodic(struct modccr *m) {

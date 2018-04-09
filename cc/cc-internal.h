@@ -25,6 +25,7 @@ struct cc {
   UT_vector /* of UT_string */ defaults;     /* pack w/o map uses this default */
   UT_vector /* of void* */     caller_addrs; /* caller pointer to copy data from */
   UT_vector /* of int       */ caller_types; /* caller pointer type i16 i32 etc */
+  UT_vector /* struct cc_map */dissect_map;  /* fulfills cc_dissect */
   UT_string flat;                            /* concatenated packed values buffer */
   UT_string tmp;
   json_t *json;
@@ -33,14 +34,9 @@ struct cc {
 const UT_mm ptr_mm;
 const UT_mm const cc_mm;
 
-#define x(t) #t,
-static char *cc_types[] = { TYPES };
-#undef x
-#define NUM_TYPES (adim(cc_types))
-
 /* we have a table of conversion functions, which have this signature */
 typedef int (*xcpf)(UT_string *to, void *from); /* caller memory -> cc */
-xcpf cc_conversions[NUM_TYPES][NUM_TYPES];
+xcpf cc_conversions[CC_MAX][CC_MAX];
 int slot_to_json(cc_type ot, char *from, size_t from_len, json_t **j);
 
 #endif // _CC_INTERNAL_H__

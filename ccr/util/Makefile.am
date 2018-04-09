@@ -2,7 +2,7 @@ srcdir = @srcdir@
 
 bin_PROGRAMS = ccr-tool 
 lib_LTLIBRARIES = libmodccr_dummy.la
-noinst_HEADERS = sconf.h modccr.h
+noinst_HEADERS = sconf.h
 
 ccr_tool_SOURCES = ccr-tool.c
 ccr_tool_CPPFLAGS = -I$(srcdir)/../src -I$(srcdir)/../../cc -I$(srcdir)/../../lib/libut_build/libut/include

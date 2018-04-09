@@ -1,0 +1,10 @@
+./ccr-tool format ring
+i32 id
+str name
+str handle
+
+shr-tool -W 0000000001000000410100000042 ring
+
+./ccr-tool pub 9999 ring
+
+./ccr-tool sub localhost:9999 new 

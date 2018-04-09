@@ -1,9 +1,14 @@
 00000000 58 00 00 00 05 00 00 00 68 65 6c 6c 6f 03 00 00 X.......hello...
 00000010 00 61 62 65                                     .abe            
-{"handle": "abe", "id": 88, "name": "hello"}
+44 bytes: {"handle": "abe", "id": 88, "name": "hello"}
 
+pretty printed
 {
  "handle": "abe",
  "id": 88,
  "name": "hello"
 }
+
+newline delimited
+45 bytes: {"handle": "abe", "id": 88, "name": "hello"}
+

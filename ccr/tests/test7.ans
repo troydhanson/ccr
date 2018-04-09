@@ -1,0 +1,8 @@
+closing
+00000000 2a 00 00 00 05 00 00 00 68 65 6c 6c 6f 05 00 00 *.......hello...
+00000010 00 77 6f 72 6c 64                               .world          
+dissect
+0 id 0 i32 42
+1 name 4 str hello
+2 handle 13 str world
+closing

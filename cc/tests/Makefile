@@ -1,5 +1,6 @@
-PROGS=test1 test2 test3 test4 test5 test6
-OBJS=$(patsubst %,%.o,$(PROGS))
+SRCS=$(wildcard test*.c)
+OBJS=$(patsubst %.c,%.o,$(SRCS))
+PROGS=$(patsubst %.o,%,$(OBJS))
 
 CFLAGS = -I.. -I../../libut/include
 CFLAGS += -g -O0

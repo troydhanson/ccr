@@ -1,29 +1,39 @@
-PROGS=test1 test2 test3 test4 test5 test6
-OBJS=$(patsubst %,%.o,$(PROGS))
+SRCS=$(wildcard test*.c)
+PROGS=$(patsubst %.c,%,  $(SRCS))
+OBJS =$(patsubst %.c,%.o,$(SRCS))
 
-CFLAGS = -I../src -I../../cc
-CFLAGS += -g -O0
+CFLAGS = -I../src -I../../cc -I../../lib/libut/include
 CFLAGS += -Wall -Wextra
-LDFLAGS=-L../src -lccr -lshr -ljansson
+CFLAGS += -g -O0
+#CFLAGS += -O2
+LDFLAGS=-lshr -ljansson
 
-TEST_TARGET=run_tests
-TESTS=./do_tests
+STATIC_OBJS=ccr.o cc.o cc_types.o ../../lib/libut/libut.a
 
-all: $(OBJS) $(PROGS) $(TEST_TARGET) 
+all: $(STATIC_OBJS) $(PROGS) tests
+
+# rather than using libtool which turns our 
+# tests into shell scripts, to dynamically
+# link the pre-installed ../src/libccr.so,
+# this Makefile builds the ../src/ objects
+# itself and links them right in statically
+$(STATIC_OBJS):
+	$(CC) -c $(CFLAGS) ../src/ccr.c
+	$(CC) -c $(CFLAGS) ../../cc/cc_types.c
+	$(CC) -c $(CFLAGS) ../../cc/cc.c
+	$(MAKE) -C ../../lib/libut -f Makefile.standalone
 
 # static pattern rule: multiple targets 
-
 $(OBJS): %.o: %.c
-	$(CC) -o $@ -c $(CFLAGS) $< 
+	$(CC) -c $(CFLAGS) $< 
 
-$(PROGS): %: %.o
-	$(CC) -o $@ $(CFLAGS) $< $(LDFLAGS)
+$(PROGS): %: %.o $(STATIC_OBJS)
+	$(CC) -o $@ $(CFLAGS) $< $(STATIC_OBJS) $(LDFLAGS)
 
+.PHONY: clean tests
 
-run_tests: $(PROGS)
-	perl $(TESTS)
-
-.PHONY: clean
+tests:
+	perl ./do_tests
 
 clean:	
-	rm -f $(PROGS) $(OBJS) *.o test*.out 
+	rm -f $(OBJS) $(PROGS) *.out *.ring *.o

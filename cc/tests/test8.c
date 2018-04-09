@@ -41,7 +41,7 @@ int main() {
   rc = cc_mapv(cc, map, adim(map));
   if (rc < 0) goto done;
 
-  s = "hello";
+  s = ""; /* empty string */
   if (cc_capture(cc, &flat, &len) < 0) {
     printf("error\n");
     goto done;
@@ -51,21 +51,13 @@ int main() {
 
   i = cc_to_json(cc, &json, &json_len, flat, len, 0);
   if (i < 0) goto done;
-  printf("%d bytes: %.*s\n", (int)json_len, (int)json_len, json);
-
-  printf("\n");
-
-  printf("pretty printed\n");
-  i = cc_to_json(cc, &json, &json_len, flat, len, CC_PRETTY);
-  if (i < 0) goto done;
   printf("%.*s\n", (int)json_len, json);
 
   printf("\n");
 
-  printf("newline delimited\n");
-  i = cc_to_json(cc, &json, &json_len, flat, len, CC_NEWLINE);
+  i = cc_to_json(cc, &json, &json_len, flat, len, CC_PRETTY);
   if (i < 0) goto done;
-  printf("%d bytes: %.*s\n", (int)json_len, (int)json_len, json);
+  printf("%.*s\n", (int)json_len, json);
 
   cc_close(cc);
 
