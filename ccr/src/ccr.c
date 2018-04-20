@@ -115,7 +115,7 @@ static int validate_text(char *text, size_t len) {
 }
 
 int ccr_init(char *ring, size_t sz, int flags, ...) {
-  int shr_flags, rc = -1, sc, need_free=0;
+  int shr_flags, rc = -1, sc, need_free=0, nmodes=0;
   char *file, *text = NULL;
   size_t len = 0;
   
@@ -126,12 +126,15 @@ int ccr_init(char *ring, size_t sz, int flags, ...) {
   if (flags & CCR_KEEPEXIST) shr_flags |= SHR_KEEPEXIST;
   if (flags & CCR_DROP)      shr_flags |= SHR_DROP;
   if (flags & CCR_FARM)      shr_flags |= SHR_FARM;
+  if (flags & CCR_MLOCK)     shr_flags |= SHR_MLOCK;
+  if (flags & CCR_SYNC)      shr_flags |= SHR_SYNC;
 
-  if (((flags & CCR_CASTFILE) == 0) &&
-      ((flags & CCR_CASTCOPY) == 0) &&
-      ((flags & CCR_CASTTEXT) == 0)) {
-    /* TODO confirm only one of them set */
-    fprintf(stderr,"ccr_init: invalid flags\n");
+  nmodes += (flags & CCR_CASTFILE) ? 1 : 0;
+  nmodes += (flags & CCR_CASTCOPY) ? 1 : 0;
+  nmodes += (flags & CCR_CASTTEXT) ? 1 : 0;
+  if (nmodes != 1) {
+    fprintf(stderr, "ccr_init: flags allow only one of: "
+                    "CCR_CASTFILE CCR_CASTCOPY CCR_CASTTEXT\n");
     goto done;
   }
 

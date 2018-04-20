@@ -58,7 +58,7 @@ struct {
   int max;
   int pretty;
   char *file;
-  enum {from_file, from_ring, from_host} format_from;
+  enum {from_unset, from_file, from_ring, from_host} format_from;
   char *format_src;
   /* mode_lib state */
   char *lib;
@@ -118,8 +118,10 @@ void usage() {
                  "  -R host:port   fetch format from publisher\n"
                  "  -m d|f|k       flags (default: 0)\n"
                  "      d          drop unread frames when full\n"
-                 "      f          farm; independent readers\n"
-                 "      k          keep; if ring exists, leave as-is\n"
+                 "      f          farm of independent readers\n"
+                 "      k          keep ring as-is if it exists\n"
+                 "      l          lock into memory when opened\n"
+                 "      s          sync after each i/o\n"
                  "\n"
                  "publish options\n"
                  "---------------\n"
@@ -865,9 +867,18 @@ int main(int argc, char *argv[]) {
       case 'v': cfg.verbose++; break;
       case 'p': cfg.pretty++; break;
       case 'b': cfg.block = 1; break;
-      case 'f': cfg.format_from=from_file; cfg.format_src=strdup(optarg); break;
-      case 'C': cfg.format_from=from_ring; cfg.format_src=strdup(optarg); break;
-      case 'R': cfg.format_from=from_host; cfg.format_src=strdup(optarg); break;
+      case 'f':
+      case 'C':
+      case 'R':
+        if (cfg.format_from != from_unset) {
+          fprintf(stderr, "only one of -f|-C|-R may be used\n");
+          exit(-1);
+        }
+        if (opt == 'f') cfg.format_from=from_file;
+        if (opt == 'C') cfg.format_from=from_ring;
+        if (opt == 'R') cfg.format_from=from_host;
+        cfg.format_src=strdup(optarg);
+        break;
       case 'E': switch (*optarg) {
                   case 'j': cfg.encoding = enc_json; break;
                   case 'b': cfg.encoding = enc_binary; break;
@@ -897,6 +908,8 @@ int main(int argc, char *argv[]) {
              case 'd': cfg.flags |= CCR_DROP; break;
              case 'f': cfg.flags |= CCR_FARM; break;
              case 'k': cfg.flags |= CCR_KEEPEXIST; break;
+             case 'l': cfg.flags |= CCR_MLOCK; break;
+             case 's': cfg.flags |= CCR_SYNC; break;
              default: usage(); break;
            }
            c++;
@@ -951,10 +964,12 @@ int main(int argc, char *argv[]) {
                " frames-ready %ld\n",
              stat.mw, stat.mr, stat.md, stat.bn, stat.mu);
         printf(" attributes ");
-        if (stat.flags == 0) printf("none");
-        if (stat.flags & SHR_DROP) printf("drop ");
+        if (stat.flags == 0)          printf("none");
+        if (stat.flags & SHR_DROP)    printf("drop ");
         if (stat.flags & SHR_APPDATA) printf("appdata ");
-        if (stat.flags & SHR_FARM) printf("farm ");
+        if (stat.flags & SHR_FARM)    printf("farm ");
+        if (stat.flags & SHR_MLOCK)   printf("mlock ");
+        if (stat.flags & SHR_SYNC)    printf("sync ");
         printf("\n");
       }
 
