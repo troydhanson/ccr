@@ -570,6 +570,11 @@ int cc_dissect(struct cc *cc, struct cc_map **map, int *count,
         assert((u8 == 4) || (u8 == 16));
         l = sizeof(uint8_t) + u8;
         break;
+      case CC_str8:
+        if (r < sizeof(uint8_t)) goto done;
+        memcpy(&u8, p, sizeof(uint8_t));
+        l = sizeof(uint8_t) + u8;
+        break;
       case CC_str: /* FALL THRU */
       case CC_blob:
         if (r < sizeof(uint32_t)) goto done;

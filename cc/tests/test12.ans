@@ -1,0 +1,5 @@
+00000000 07 41 62 72 61 68 61 6d 01 41                   .Abraham.A      
+
+{"name": "Abraham", "type": "A"}
+0 name name off 0 type 10
+1 name type off 8 type 10

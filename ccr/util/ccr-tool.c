@@ -116,7 +116,7 @@ void usage() {
                  "  -f file        read format from file\n"
                  "  -C ring        copy format from ring\n"
                  "  -R host:port   fetch format from publisher\n"
-                 "  -m d|f|k       flags (default: 0)\n"
+                 "  -m dfksl       flags (default: 0)\n"
                  "      d          drop unread frames when full\n"
                  "      f          farm of independent readers\n"
                  "      k          keep ring as-is if it exists\n"
