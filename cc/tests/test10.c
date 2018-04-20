@@ -1,3 +1,6 @@
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <string.h>
 #include <assert.h>
 #include <stddef.h>
@@ -24,7 +27,7 @@ struct test t1 = {
   .u = 3,
   .d = 4,
   .mac = {5,6,7,8,9,10},
-  .ipv4 = (10U << 24) | (10U << 16) | (10U << 8) | 10U,
+  .ipv4 = 0x04030201,
   .b = {.len = 5,
         .buf = "\xaa\xbb\xcc\xdd\xee"},
   .s = "world",
@@ -77,6 +80,7 @@ int main() {
 
   /* populate struct and capture */
   t = t1;
+  t.ipv4 = inet_addr("192.168.10.16");
   sc = cc_capture(cc, &flat, &len);
   if (sc < 0) goto done;
 

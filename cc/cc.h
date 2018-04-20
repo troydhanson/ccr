@@ -18,6 +18,7 @@
                   x(ipv4)   \
                    x(mac)   \
                   x(blob)   \
+                 x(ipv46)   \
                    x(MAX) /* last */
 
 extern char *cc_types[];

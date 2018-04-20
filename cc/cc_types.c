@@ -144,7 +144,16 @@ static int xcpf_i32_i32(UT_string *d, void *p) {
   return 0;
 }
 
+/* assumes source i32 is already in network order */
 static int xcpf_i32_ipv4(UT_string *d, void *p) {
+  utstring_bincpy(d, p, sizeof(int32_t));
+  return 0;
+}
+
+/* assumes source i32 is already in network order */
+static int xcpf_i32_ipv46(UT_string *d, void *p) {
+  uint8_t u8 = 4;
+  utstring_bincpy(d, &u8, sizeof(uint8_t));
   utstring_bincpy(d, p, sizeof(int32_t));
   return 0;
 }
@@ -177,19 +186,53 @@ static int xcpf_ipv4_ipv4(UT_string *d, void *p) {
   return 0;
 }
 
+static int xcpf_ipv4_ipv46(UT_string *d, void *p) {
+  uint8_t u8 = 4;
+  utstring_bincpy(d, &u8, sizeof(uint8_t));
+  utstring_bincpy(d, p, sizeof(int32_t));
+  return 0;
+}
+
+/* consider u32 as in network order; see also slot_to_json case CC_ipv4*/
 static int xcpf_ipv4_str(UT_string *d, void *p) {
   uint32_t u32 = *(uint32_t*)p;
-  uint8_t ia, ib, ic, id;
-  char s[20];
-  /* consider u32 as in network order; see also slot_to_json case CC_ipv4*/
-  ia = (u32 & 0x000000ff) >>  0;
-  ib = (u32 & 0x0000ff00) >>  8;
-  ic = (u32 & 0x00ff0000) >> 16;
-  id = (u32 & 0xff000000) >> 24;
-  snprintf(s, sizeof(s), "%d.%d.%d.%d", (int)ia, (int)ib, (int)ic, (int)id);
-  uint32_t l = strlen(s);
+  char out[INET_ADDRSTRLEN];
+  if (inet_ntop(AF_INET, &u32, out, sizeof(out)) == NULL)
+    return -1;
+  uint32_t l = strlen(out);
   utstring_bincpy(d, &l, sizeof(l));
-  utstring_bincpy(d, s, l);
+  utstring_bincpy(d, out, l);
+  return 0;
+}
+
+static int xcpf_ipv46_ipv46(UT_string *d, void *p) {
+  uint8_t u8;
+  memcpy(&u8, p, sizeof(u8));
+  assert((u8 == 4) || (u8 == 16));
+  utstring_bincpy(d, p, sizeof(uint8_t) + u8);
+  return 0;
+}
+
+static int xcpf_ipv46_str(UT_string *d, void *p) {
+  uint8_t u8;
+
+  memcpy(&u8, p, sizeof(u8));
+  assert((u8 == 4) || (u8 == 16));
+
+  p = (char*)p + sizeof(uint8_t);
+
+  if (u8 == 4)
+    return xcpf_ipv4_str(d, p);
+
+  char out[INET6_ADDRSTRLEN];
+  struct in6_addr ia6;
+  memcpy(&ia6, p, sizeof(ia6));
+  if (inet_ntop(AF_INET6, &ia6, out, sizeof(out)) == NULL)
+    return -1;
+
+  uint32_t l = strlen(out);
+  utstring_bincpy(d, &l, sizeof(l));
+  utstring_bincpy(d, out, l);
   return 0;
 }
 
@@ -222,13 +265,40 @@ static int xcpf_str_i32(UT_string *d, void *p) {
 
 static int xcpf_str_ipv4(UT_string *d, void *p) {
   char **s = (char **)p;
-  int ia, ib, ic, id;
-  uint32_t ip;
-  if (sscanf(*s, "%d.%d.%d.%d", &ia, &ib, &ic, &id) != 4) return -1;
-  if ((ia > 255) || (ib > 255) || (ic > 255) || (id > 255)) return -1;
-  ip = (ia << 24) | (ib << 16) || (ic << 8) | id;
-  utstring_bincpy(d, &ip, sizeof(ip));
+  struct in_addr ia;
+  assert(sizeof(ia) == 4);
+  if (inet_pton(AF_INET, *s, &ia) <= 0)
+    return -1;
+  utstring_bincpy(d, &ia, sizeof(ia));
   return 0;
+}
+
+static int xcpf_str_ipv46(UT_string *d, void *p) {
+  char **s = (char **)p;
+  struct in_addr ia4;
+  struct in6_addr ia6;
+  uint8_t u8;
+  int sc;
+
+  sc = inet_pton(AF_INET, *s, &ia4);
+  if (sc == 1) {
+    u8 = 4;
+    assert(sizeof(ia4) == 4);
+    utstring_bincpy(d, &u8, sizeof(uint8_t));
+    utstring_bincpy(d, &ia4, sizeof(ia4));
+    return 0;
+  }
+
+  sc = inet_pton(AF_INET6, *s, &ia6);
+  if (sc == 1) {
+    u8 = 16;
+    assert(sizeof(ia6) == 16);
+    utstring_bincpy(d, &u8, sizeof(uint8_t));
+    utstring_bincpy(d, &ia6, sizeof(ia6));
+    return 0;
+  }
+
+  return -1;
 }
 
 static int xcpf_str_str(UT_string *d, void *p) {
@@ -400,6 +470,7 @@ xcpf cc_conversions[/*from*/CC_MAX][/*to*/CC_MAX] = {
   [CC_i16][CC_i16] = xcpf_i16_i16,
   [CC_i16][CC_i32] = xcpf_i16_i32,
   [CC_i16][CC_ipv4] = NULL,
+  [CC_i16][CC_ipv46] = NULL,
   [CC_i16][CC_str] = xcpf_i16_str,
   [CC_i16][CC_i8] = NULL,
   [CC_i16][CC_d64] = xcpf_i16_d64,
@@ -410,6 +481,7 @@ xcpf cc_conversions[/*from*/CC_MAX][/*to*/CC_MAX] = {
   [CC_u16][CC_i16] = xcpf_u16_i16,
   [CC_u16][CC_i32] = xcpf_u16_i32,
   [CC_u16][CC_ipv4] = NULL,
+  [CC_u16][CC_ipv46] = NULL,
   [CC_u16][CC_str] = xcpf_u16_str,
   [CC_u16][CC_i8] = NULL,
   [CC_u16][CC_d64] = xcpf_u16_d64,
@@ -420,6 +492,7 @@ xcpf cc_conversions[/*from*/CC_MAX][/*to*/CC_MAX] = {
   [CC_i32][CC_i16] = NULL,
   [CC_i32][CC_i32] = xcpf_i32_i32,
   [CC_i32][CC_ipv4] = xcpf_i32_ipv4,
+  [CC_i32][CC_ipv46] = xcpf_i32_ipv46,
   [CC_i32][CC_str] = xcpf_i32_str,
   [CC_i32][CC_i8] = NULL,
   [CC_i32][CC_d64] = xcpf_i32_d64,
@@ -430,16 +503,29 @@ xcpf cc_conversions[/*from*/CC_MAX][/*to*/CC_MAX] = {
   [CC_ipv4][CC_i16] = NULL,
   [CC_ipv4][CC_i32] = xcpf_ipv4_i32,
   [CC_ipv4][CC_ipv4] = xcpf_ipv4_ipv4,
+  [CC_ipv4][CC_ipv46] = xcpf_ipv4_ipv46,
   [CC_ipv4][CC_str] = xcpf_ipv4_str,
   [CC_ipv4][CC_i8] = NULL,
   [CC_ipv4][CC_d64] = NULL,
   [CC_ipv4][CC_mac] = NULL,
   [CC_ipv4][CC_blob] = NULL,
 
+  [CC_ipv46][CC_u16] = NULL,
+  [CC_ipv46][CC_i16] = NULL,
+  [CC_ipv46][CC_i32] = NULL,
+  [CC_ipv46][CC_ipv4] = NULL,
+  [CC_ipv46][CC_ipv46] = xcpf_ipv46_ipv46,
+  [CC_ipv46][CC_str] = xcpf_ipv46_str,
+  [CC_ipv46][CC_i8] = NULL,
+  [CC_ipv46][CC_d64] = NULL,
+  [CC_ipv46][CC_mac] = NULL,
+  [CC_ipv46][CC_blob] = NULL,
+
   [CC_str][CC_u16] = xcpf_str_u16,
   [CC_str][CC_i16] = xcpf_str_i16,
   [CC_str][CC_i32] = xcpf_str_i32,
   [CC_str][CC_ipv4] = xcpf_str_ipv4,
+  [CC_str][CC_ipv46] = xcpf_str_ipv46,
   [CC_str][CC_str] = xcpf_str_str,
   [CC_str][CC_i8] = xcpf_str_i8,
   [CC_str][CC_d64] = xcpf_str_d64,
@@ -450,6 +536,7 @@ xcpf cc_conversions[/*from*/CC_MAX][/*to*/CC_MAX] = {
   [CC_i8][CC_i16] = xcpf_i8_i16,
   [CC_i8][CC_i32] = xcpf_i8_i32,
   [CC_i8][CC_ipv4] = NULL,
+  [CC_i8][CC_ipv46] = NULL,
   [CC_i8][CC_str] = xcpf_i8_str,
   [CC_i8][CC_i8] = xcpf_i8_i8,
   [CC_i8][CC_d64] = xcpf_i8_d64,
@@ -460,6 +547,7 @@ xcpf cc_conversions[/*from*/CC_MAX][/*to*/CC_MAX] = {
   [CC_d64][CC_i16] = xcpf_d64_i16,
   [CC_d64][CC_i32] = xcpf_d64_i32,
   [CC_d64][CC_ipv4] = NULL,
+  [CC_d64][CC_ipv46] = NULL,
   [CC_d64][CC_str] = xcpf_d64_str,
   [CC_d64][CC_i8] = xcpf_d64_i8,
   [CC_d64][CC_d64] = xcpf_d64_d64,
@@ -480,6 +568,7 @@ xcpf cc_conversions[/*from*/CC_MAX][/*to*/CC_MAX] = {
   [CC_blob][CC_i16] = NULL,
   [CC_blob][CC_i32] = NULL,
   [CC_blob][CC_ipv4] = NULL,
+  [CC_blob][CC_ipv46] = NULL,
   [CC_blob][CC_str] = xcpf_blob_str,
   [CC_blob][CC_i8] = NULL,
   [CC_blob][CC_d64] = NULL,
@@ -492,7 +581,8 @@ xcpf cc_conversions[/*from*/CC_MAX][/*to*/CC_MAX] = {
  *
  * simple encoder of binary to safe string. caller must free!
  */
-static char hex[16] = {'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'};
+static char hex[16] = {'0','1','2','3','4','5','6','7','8','9',
+                       'a','b','c','d','e','f'};
 static char *blob_encode(char *from, size_t len, size_t *enc_len) {
   char *enc, *e;
   unsigned char f;
@@ -514,19 +604,33 @@ static char *blob_encode(char *from, size_t len, size_t *enc_len) {
   return enc;
 }
 
-/* convert a single item from flat cc buffer to a refcounted json value. 
- * the caller is expected to steal the reference (e.g. json_set_object_new).
- * return the number of bytes consumed (indexed into from) or -1 on error */
+/*
+ * slot_to_json
+ *
+ * convert a single item from flat cc buffer 
+ * to a refcounted json value. 
+ *
+ * the caller is expected to steal the reference 
+ * (e.g. json_set_object_new).
+ *
+ * return 
+ *    bytes consumed (into from) on success
+ *    or -1 on error 
+ *
+ */
 int slot_to_json(cc_type ot, char *from, size_t len, json_t **j) {
   int rc = -1;
   unsigned l=0;
   int8_t i8;
-  uint8_t ia, ib, ic, id;
+  uint8_t u8;
   int16_t i16;
   uint16_t u16;
   int32_t i32;
   uint32_t u32;
   char s[20];
+  char ip4str[INET_ADDRSTRLEN];
+  char ip6str[INET6_ADDRSTRLEN];
+  struct in6_addr ia6;
   unsigned char *m;
   double f;
   char *enc;
@@ -593,17 +697,35 @@ int slot_to_json(cc_type ot, char *from, size_t len, json_t **j) {
       *j = json_real(f);
       if (*j == NULL) goto done;
       break;
+    case CC_ipv46:
+      l = sizeof(uint8_t);
+      if (len < l) goto done;
+      memcpy(&u8, from, l);
+      assert((u8 == 4) || (u8 == 16));
+      l += u8;
+      from += sizeof(uint8_t);
+      len -=  sizeof(uint8_t);
+      if (len < u8) goto done;
+      if (u8 == 16) {
+        memcpy(&ia6, from, sizeof(struct in6_addr));
+        if (inet_ntop(AF_INET6, &ia6, ip6str, sizeof(ip6str)) == NULL)
+          goto done;
+        *j = json_string(ip6str);
+        if (*j == NULL) goto done;
+      } else {
+        assert(u8 == 4);
+        memcpy(&u32, from, sizeof(u32));
+        if (inet_ntop(AF_INET, &u32, ip4str, sizeof(ip4str)) == NULL) goto done;
+        *j = json_string(ip4str);
+        if (*j == NULL) goto done;
+      }
+      break;
     case CC_ipv4:
       l = sizeof(uint32_t);
       if (len < l) goto done;
       memcpy(&u32, from, l);
-      /* consider u32 as in network order; see also xcpf_ipv4_str*/
-      ia = (u32 & 0x000000ff) >>  0;
-      ib = (u32 & 0x0000ff00) >>  8;
-      ic = (u32 & 0x00ff0000) >> 16;
-      id = (u32 & 0xff000000) >> 24;
-      snprintf(s, sizeof(s), "%d.%d.%d.%d", (int)ia, (int)ib, (int)ic, (int)id);
-      *j = json_string(s);
+      if (inet_ntop(AF_INET, &u32, ip4str, sizeof(ip4str)) == NULL) goto done;
+      *j = json_string(ip4str);
       if (*j == NULL) goto done;
       break;
     case CC_mac:

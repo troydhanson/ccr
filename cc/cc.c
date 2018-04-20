@@ -534,6 +534,7 @@ int cc_dissect(struct cc *cc, struct cc_map **map, int *count,
   UT_string *fn;
   uint32_t u32;
   cc_type *ot;
+  uint8_t u8;
   size_t l,r;
   char *p;
 
@@ -561,9 +562,16 @@ int cc_dissect(struct cc *cc, struct cc_map **map, int *count,
       case CC_u16:  l = sizeof(uint16_t); break;
       case CC_i32:  l = sizeof(int32_t);  break;
       case CC_d64:  l = sizeof(double);   break;
-      case CC_ipv4: l = 4; break;
       case CC_mac:  l = 6; break;
-      case CC_str:  case CC_blob: /* str/blob */
+      case CC_ipv4: l = 4; break;
+      case CC_ipv46:
+        if (r < sizeof(uint8_t)) goto done;
+        memcpy(&u8, p, sizeof(uint8_t));
+        assert((u8 == 4) || (u8 == 16));
+        l = sizeof(uint8_t) + u8;
+        break;
+      case CC_str: /* FALL THRU */
+      case CC_blob:
         if (r < sizeof(uint32_t)) goto done;
         memcpy(&u32, p, sizeof(uint32_t));
         l = sizeof(uint32_t) + u32;
