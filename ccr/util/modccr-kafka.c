@@ -11,6 +11,7 @@ struct mod_data {
   char *broker;
   char *topic;
   int pretty;
+  int nmsgs;
 
   /* kafka */
   rd_kafka_t *k;
@@ -19,15 +20,17 @@ struct mod_data {
   rd_kafka_topic_conf_t *topic_conf;
 };
 
-static void err_cb (rd_kafka_t *rk, int err, const char *reason, void *data) {
+static void err_cb (rd_kafka_t *rk, int err, const char *reason, void *opaque) {
+  struct modccr *m = (struct modccr *)opaque;
   fprintf(stderr,"librdkafka: error, %s %s: %s\n",
     rd_kafka_name(rk), rd_kafka_err2str(err), reason);
 }
 
-/* a delivery report callback that gets invoked for every message */
+/* delivery report callback gets invoked for every message */
 static void delivery_report_cb (rd_kafka_t *rk, void *payload, size_t len,
      rd_kafka_resp_err_t err, void *opaque, void *msg_opaque) {
-  if ((cfg.verbose == 0) && (err == 0)) return;
+  struct modccr *m = (struct modccr *)opaque;
+  if ((m->verbose == 0) && (err == 0)) return;
   fprintf(stderr,"librdkafka message delivery report: %s: msg len %zu: %s\n",
     rd_kafka_name(rk), len, err ? rd_kafka_err2str(err) : "ok");
 }
@@ -38,9 +41,11 @@ static int setup_kafka(struct modccr *m) {
   int rc=-1, kr;
 
   md->conf = rd_kafka_conf_new();
+  rd_kafka_conf_set_opaque(md->conf, m);
   rd_kafka_conf_set_error_cb(md->conf, err_cb);
   rd_kafka_conf_set_dr_cb(md->conf, delivery_report_cb);
   md->topic_conf = rd_kafka_topic_conf_new();
+
 
   md->k = rd_kafka_new(RD_KAFKA_PRODUCER, md->conf, err, sizeof(err));
   if (md->k == NULL) {
@@ -67,13 +72,12 @@ static int setup_kafka(struct modccr *m) {
 
 /* function called at 1 hz from ccr-tool. */
 static int mod_periodic(struct modccr *m) {
+  struct mod_data *md = (struct mod_data*)m->data;
   int n;
-  if (m->verbose) fprintf(stderr, "mod_periodic\n");
 
   /* invoke callbacks, draining */
-  do {
-    n = rd_kafka_poll(md->k, 0);
-  } while (n > 0);
+  do { n = rd_kafka_poll(md->k, 0); }
+    while (n > 0);
 
   return 0;
 }
@@ -92,6 +96,7 @@ static int mod_fini(struct modccr *m) {
 static int mod_work(struct modccr *m, struct ccr *ccr) {
   struct mod_data *md = (struct mod_data*)m->data;
   int sc, fl, rc = -1;
+  const char *err;
   char *out;
   size_t len;
 
@@ -101,18 +106,26 @@ static int mod_work(struct modccr *m, struct ccr *ccr) {
   fl |= md->pretty ? CCR_PRETTY : 0;
   sc = ccr_getnext(ccr, fl, &out, &len);
   if (sc < 0) goto done;
-  if (sc > 0) {
-    if (m->verbose) printf("%.*s\n", (int)len, out);
-
-    if (rd_kafka_produce(md->t, RD_KAFKA_PARTITION_UA, RD_KAFKA_MSG_F_COPY,
-                          out, len, NULL, 0, NULL) < 0) {
-
-      fprintf(stderr, "rd_kafka_produce: %s %s\n",
-        rd_kafka_err2str( rd_kafka_errno2err(errno)),
-        ((errno == ENOBUFS) ? "(backpressure)" : ""));
-      goto done;
-    }
+  if (sc == 0) {
+    rc = 0;
+    goto done;
   }
+
+  /* publish one message */
+  if (m->verbose) printf("%.*s\n", (int)len, out);
+  sc = rd_kafka_produce(md->t, RD_KAFKA_PARTITION_UA, 
+       RD_KAFKA_MSG_F_COPY, out, len, NULL, 0, NULL);
+  if (sc < 0) {
+    err = rd_kafka_err2str( rd_kafka_last_error());
+    fprintf(stderr, "rd_kafka_produce: %s\n", err);
+    goto done;
+  }
+
+  md->nmsgs++;
+
+  /* cause librdkafka to invoke pending cb's */
+  if ((md->nmsgs % 1000) == 0)
+    rd_kafka_poll(md->k, 0);
 
   rc = 0;
 
