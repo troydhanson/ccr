@@ -20,8 +20,16 @@ struct mod_data {
 };
 
 static void err_cb (rd_kafka_t *rk, int err, const char *reason, void *data) {
-  fprintf(stderr,"%% ERROR CALLBACK: %s: %s: %s\n",
+  fprintf(stderr,"librdkafka: error, %s %s: %s\n",
     rd_kafka_name(rk), rd_kafka_err2str(err), reason);
+}
+
+/* a delivery report callback that gets invoked for every message */
+static void delivery_report_cb (rd_kafka_t *rk, void *payload, size_t len,
+     rd_kafka_resp_err_t err, void *opaque, void *msg_opaque) {
+  if ((cfg.verbose == 0) && (err == 0)) return;
+  fprintf(stderr,"librdkafka message delivery report: %s: msg len %zu: %s\n",
+    rd_kafka_name(rk), len, err ? rd_kafka_err2str(err) : "ok");
 }
 
 static int setup_kafka(struct modccr *m) {
@@ -31,6 +39,7 @@ static int setup_kafka(struct modccr *m) {
 
   md->conf = rd_kafka_conf_new();
   rd_kafka_conf_set_error_cb(md->conf, err_cb);
+  rd_kafka_conf_set_dr_cb(md->conf, delivery_report_cb);
   md->topic_conf = rd_kafka_topic_conf_new();
 
   md->k = rd_kafka_new(RD_KAFKA_PRODUCER, md->conf, err, sizeof(err));
@@ -56,9 +65,16 @@ static int setup_kafka(struct modccr *m) {
   return rc;
 }
 
-/* function called at 1 hz from ccr-tool */
+/* function called at 1 hz from ccr-tool. */
 static int mod_periodic(struct modccr *m) {
+  int n;
   if (m->verbose) fprintf(stderr, "mod_periodic\n");
+
+  /* invoke callbacks, draining */
+  do {
+    n = rd_kafka_poll(md->k, 0);
+  } while (n > 0);
+
   return 0;
 }
 

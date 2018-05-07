@@ -425,7 +425,7 @@ static int xcpf_str_d64(UT_string *d, void *p) {
 static int xcpf_str_mac(UT_string *d, void *p) {
   char **c = (char **)p;
   unsigned int ma, mb, mc, md, me, mf;
-  if (sscanf(*c, "%x:%x:%x:%x:%x:%x", &ma,&mb,&mc,&md,&me,&mf) != 1) return -1;
+  if (sscanf(*c, "%x:%x:%x:%x:%x:%x", &ma,&mb,&mc,&md,&me,&mf) != 6) return -1;
   if ((ma > 255) || (mb > 255) || (mc > 255) || 
       (md > 255) || (me > 255) || (mf > 255)) return -1;
   utstring_printf(d, "%c%c%c%c%c%c", ma, mb, mc, md, me, mf);
