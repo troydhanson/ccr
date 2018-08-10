@@ -487,7 +487,6 @@ int cc_to_json(struct cc *cc, char **out, size_t *out_len,
   return rc;
 }
 
-#if 0
 int cc_restore(struct cc *cc, char *flat, size_t len) {
   int rc = -1;
 
@@ -496,7 +495,6 @@ int cc_restore(struct cc *cc, char *flat, size_t len) {
  done:
   return rc;
 }
-#endif
 
 /*
  * cc_dissect

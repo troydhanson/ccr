@@ -257,11 +257,11 @@ int ccr_capture(struct ccr *ccr) {
  * Read one frame from the ring.
  * Block if ring empty, or return immediately in CCR_NONBLOCK mode.
  *
- * flags        varags                 description
- * -----       ---------------------   ---------------------
- * CCR_BUFFER  char**buf, size_t *len  get a volatile buffer
- * CCR_BUFFER|
- *  CCR_JSON   char**buf, size_t *len  get volatile json buffer
+ * flags                   varags                 description
+ * -----                  ---------------------   ---------------------
+ * CCR_BUFFER             char**buf, size_t *len  get volatile buffer
+ * CCR_BUFFER| CCR_JSON   char**buf, size_t *len  get volatile json buffer
+ * CCR_RESTORE            n/a                     unpack to caller memory
  *
  * if CCR_JSON is specified, CCR_PRETTY and CCR_NEWLINE may be
  * OR'd to pretty-print the JSON and append a newline respectively.
@@ -269,23 +269,29 @@ int ccr_capture(struct ccr *ccr) {
  * CCR_LEN4FIRST can be OR'd to get the buffer prepended with a 
  * 4-byte native endian length prefix. (not supported in CCR_JSON)
  *
+ * CCR_RESTORE reads a frame and unpacks the fields back to previously
+ * ccr_mapv'd caller memory. (not supported in CCR_JSON)
+ *
  * returns:
- *   > 0 (success; data was read from ring)
- *   0   (ring empty, in non-blocking mode)
- *  -1   (error)
+ *   > 0   (success; data was read from ring)
+ *     0   (ring empty, in non-blocking mode)
+ *    -1   (error)
  *
  */
 ssize_t ccr_getnext(struct ccr *ccr, int flags, ...) {
   ssize_t nr = -1;
   char *buf, **out;
   size_t avail, *out_len;
-  int fl = 0, sc;
+  int fl = 0, sc, v=0;
 
   va_list ap;
   va_start(ap, flags);
 
-  /* 'buffer' is the only mode right now */
-  if ((flags & CCR_BUFFER) == 0) goto done;
+  /* must be one mode or the other */
+  v += (flags & CCR_BUFFER) ?  1 : 0;
+  v += (flags & CCR_RESTORE) ? 1 : 0;
+  if (v != 1) goto done;
+
   if (flags & CCR_PRETTY)  fl |= CC_PRETTY;
   if (flags & CCR_NEWLINE) fl |= CC_NEWLINE;
 
@@ -316,27 +322,38 @@ ssize_t ccr_getnext(struct ccr *ccr, int flags, ...) {
   /* no data? (nonblock mode) */
   if (nr == 0) goto done;
 
-  /* want json encoding? */
-  if (flags & CCR_JSON) {
-    sc = cc_to_json(ccr->cc, out, out_len, buf, nr, fl);
-    if (sc < 0) nr = -1;
-    goto done; /* on either success or error */
-  }
-  else if (flags & CCR_LEN4FIRST) {
-    if (nr > UINT32_MAX) {
-      fprintf(stderr, "frame exceeds 32-bit length\n");
-      goto done;
-    }
-    uint32_t len32 = (uint32_t)nr;
-    assert(buf == (ccr->tmp->d + sizeof(uint32_t)));
-    buf = ccr->tmp->d;
-    memcpy(buf, &len32, sizeof(len32));
-    nr += sizeof(len32);
+  /* BUFFER is the first major mode */
+  if (flags & CCR_BUFFER) {
+
+    assert((flags & CCR_RESTORE) == 0);
+
+    if (flags & CCR_JSON) {
+      sc = cc_to_json(ccr->cc, out, out_len, buf, nr, fl);
+      if (sc < 0) nr = -1;
+    } else {
+      if (flags & CCR_LEN4FIRST) {
+        if (nr > UINT32_MAX) {
+          fprintf(stderr, "frame exceeds 32-bit length\n");
+          goto done;
+        }
+        uint32_t len32 = (uint32_t)nr;
+        assert(buf == (ccr->tmp->d + sizeof(uint32_t)));
+        buf = ccr->tmp->d;
+        memcpy(buf, &len32, sizeof(len32));
+        nr += sizeof(len32);
+      }
+
+      *out = buf;
+      *out_len = nr;
+   }
   }
 
-  /* flat ccr buffer */
-  *out = buf;
-  *out_len = nr;
+  /* RESTORE is the second major mode */
+  if (flags & CCR_RESTORE) {
+    assert((flags & CCR_BUFFER) == 0);
+    sc = cc_restore(ccr->cc, buf, nr);
+    if (sc < 0) nr = -1;
+  }
 
  done:
   va_end(ap);

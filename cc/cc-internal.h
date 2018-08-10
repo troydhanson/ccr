@@ -32,7 +32,7 @@ struct cc {
 };
 
 const UT_mm ptr_mm;
-const UT_mm const cc_mm;
+const UT_mm cc_mm;
 
 /* we have a table of conversion functions, which have this signature */
 typedef int (*xcpf)(UT_string *to, void *from); /* caller memory -> cc */

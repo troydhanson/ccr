@@ -20,6 +20,7 @@
 #define CCR_PRETTY    (1U << 14)
 #define CCR_NEWLINE   (1U << 15)
 #define CCR_LEN4FIRST (1U << 16)
+#define CCR_RESTORE   (1U << 17)
 
 struct ccr; /* defined internally */
 
