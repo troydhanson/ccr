@@ -64,6 +64,6 @@ int cc_dissect(struct cc *cc, struct cc_map **map, int *count,
        char *in, size_t in_len, int flags);
 
 /* reads flattened buffer, unpack to caller memory */
-int cc_restore(struct cc *cc, char *flat, size_t len);
+int cc_restore(struct cc *cc, char *flat, size_t len, int flags);
 
 #endif // __CC_H__

@@ -487,8 +487,94 @@ int cc_to_json(struct cc *cc, char **out, size_t *out_len,
   return rc;
 }
 
-int cc_restore(struct cc *cc, char *flat, size_t len) {
-  int rc = -1;
+static size_t cc_is_fixed_length(cc_type t) {
+  if (CC_i8    == t) return sizeof(uint8_t);
+  if (CC_i16   == t) return sizeof(int16_t);
+  if (CC_u16   == t) return sizeof(uint16_t);
+  if (CC_i32   == t) return sizeof(int32_t);
+  if (CC_ipv4  == t) return sizeof(int32_t);
+  if (CC_mac   == t) return 6 * sizeof(char);
+  if (CC_d64   == t) return sizeof(double);
+  return 0;
+}
+
+/*
+ * cc_restore
+ *
+ * extract data from flattened buffer to caller mappings
+ *
+ * given a flattened buffer (in), and a struct cc the caller 
+ * has mapped using cc_mapv, this function unpacks the values
+ * from the flattened buffer into caller memory.
+ *
+ * CALLER MUST ASSUME THE RESTORED VALUES ARE IN VOLATILE MEMORY!
+ * That means, the values are only valid immediately when this
+ * function returns. They are invalidated by a subsequent call
+ * of cc_restore, cc_dissect, cc_capture or cc_close.
+ *
+ *  in:     flattened input buffer (e.g. from cc_capture)
+ *  in_len: length of in
+ *  flags:  must be 0
+
+ * returns
+ *  0 success
+ * -1 error (such as input buffer fails validation)
+ *
+*/
+int cc_restore(struct cc *cc, char *in, size_t in_len, int flags) {
+  void **mp, **ca, *p, *flat_before=NULL;
+  int sc, rc = -1, count, i;
+  struct cc_map *map = NULL;
+  size_t off, l;
+  cc_type *ct;
+
+  if (flags) goto done;
+
+  sc = cc_dissect(cc, &map, &count, in, in_len, 0);
+  if (sc < 0) goto done;
+
+  while(cc->flat.d != flat_before) {
+    utstring_clear(&cc->flat);
+    flat_before = cc->flat.d;
+
+    for(i = 0; i < count; i++) {
+
+      /* has caller mapped this item? */
+      mp = utvector_elt(&cc->caller_addrs, i);
+      if (*mp == NULL) continue;
+
+      /* convert stored type to the caller type */
+      ct = utvector_elt(&cc->caller_types, i);
+      ca = utvector_elt(&cc->caller_addrs, i);
+      xcpf fcn = cc_conversions[map[i].type][*ct];
+      assert(fcn);
+
+      /* record offset in flat of next datum */
+      off = cc->flat.i;
+      sc = fcn(&cc->flat, map[i].addr);
+      if (sc < 0) {
+        fprintf(stderr,"conversion error\n");
+        goto done;
+      }
+
+      /* give caller the converted item by value,
+       * or by pointer if its not of fixed length */
+      l = cc_is_fixed_length(*ct);
+      if (l) memcpy(*ca, cc->flat.d + off, l);
+      else if ((*ct == CC_ipv46) || (*ct == CC_blob)) {
+        p = cc->flat.d + off;
+        memcpy(*ca, &p, sizeof(void*));
+      } else if ((*ct == CC_str8) || (*ct == CC_str)) {
+        utstring_bincpy(&cc->flat, "\0", sizeof(char));
+        off += sizeof(uint32_t);
+        p = cc->flat.d + off;
+        memcpy(*ca, &p, sizeof(void*));
+      } else {
+        assert(0);
+        goto done;
+      }
+    }
+  }
 
   rc = 0;
 
@@ -509,10 +595,9 @@ int cc_restore(struct cc *cc, char *flat, size_t len) {
  *   map[n].addr  - pointer into input buffer
  *   map[n].type  - CC_i8, CC_i16, etc field type
  *
- * the map array is volatile; it's internal to the ccr structure.
- * it's overwritten on each call. it remains valid only as long 
- * as the caller keeps the input buffer intact until cc_dissect
- * or ccr_close is called.
+ * the map array is volatile; it's internal to the cc structure.
+ * it remains valid while the caller keeps the input buffer intact
+ * only until the next call to cc_dissect, cc_restore or cc_close.
  *
  *  map:    receives the map
  *  count:  receives number of elements in map
