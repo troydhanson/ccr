@@ -27,6 +27,7 @@ struct cc {
   UT_vector /* of int       */ caller_types; /* caller pointer type i16 i32 etc */
   UT_vector /* struct cc_map */dissect_map;  /* fulfills cc_dissect */
   UT_string flat;                            /* concatenated packed values buffer */
+  UT_string rest;                            /* retored volatile values buffer */
   UT_string tmp;
   json_t *json;
 };

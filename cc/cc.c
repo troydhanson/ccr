@@ -525,7 +525,7 @@ static size_t cc_is_fixed_length(cc_type t) {
  *
 */
 int cc_restore(struct cc *cc, char *in, size_t in_len, int flags) {
-  void **mp, **ca, *p, *flat_before=NULL;
+  void **mp, **ca, *p, *rest_before=NULL;
   int sc, rc = -1, count, i;
   struct cc_map *map = NULL;
   size_t off, l;
@@ -536,9 +536,9 @@ int cc_restore(struct cc *cc, char *in, size_t in_len, int flags) {
   sc = cc_dissect(cc, &map, &count, in, in_len, 0);
   if (sc < 0) goto done;
 
-  while(cc->flat.d != flat_before) {
-    utstring_clear(&cc->flat);
-    flat_before = cc->flat.d;
+  while(cc->rest.d != rest_before) {
+    utstring_clear(&cc->rest);
+    rest_before = cc->rest.d;
 
     for(i = 0; i < count; i++) {
 
@@ -552,9 +552,9 @@ int cc_restore(struct cc *cc, char *in, size_t in_len, int flags) {
       xcpf fcn = cc_conversions[map[i].type][*ct];
       assert(fcn);
 
-      /* record offset in flat of next datum */
-      off = cc->flat.i;
-      sc = fcn(&cc->flat, map[i].addr, CC_FLAT2MEM);
+      /* record offset of next datum */
+      off = cc->rest.i;
+      sc = fcn(&cc->rest, map[i].addr, CC_FLAT2MEM);
       if (sc < 0) {
         fprintf(stderr,"conversion error\n");
         goto done;
@@ -563,18 +563,16 @@ int cc_restore(struct cc *cc, char *in, size_t in_len, int flags) {
       /* give caller the converted item by value,
        * or by pointer if its not of fixed length */
       l = cc_is_fixed_length(*ct);
-      if (l) memcpy(*ca, cc->flat.d + off, l);
+      if (l) memcpy(*ca, cc->rest.d + off, l);
       else if (*ct == CC_ipv46) {
-        p = cc->flat.d + off;
+        p = cc->rest.d + off;
         memcpy(*ca, &p, sizeof(void*));
       } else if ((*ct == CC_str8) || (*ct == CC_str)) {
-        utstring_bincpy(&cc->flat, "\0", sizeof(char));
-        off += sizeof(uint32_t);
-        p = cc->flat.d + off;
+        p = cc->rest.d + off;
         memcpy(*ca, &p, sizeof(void*));
       } else if (*ct == CC_blob) {
-        p = cc->flat.d + off;
-        struct cc_blob *bp = (struct cc_blob*)ca;
+        p = cc->rest.d + off;
+        struct cc_blob *bp = (struct cc_blob*)(*ca);
         memcpy(&bp->len, p, sizeof(uint32_t));
         bp->buf = p + sizeof(uint32_t);
       } else {

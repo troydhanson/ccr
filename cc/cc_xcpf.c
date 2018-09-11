@@ -277,6 +277,10 @@ xcpf cc_conversions[/*from*/CC_MAX][/*to*/CC_MAX] = {
   [CC_str][CC_mac] = xcpf_str_mac,
   [CC_str][CC_blob] = xcpf_str_blob,
 
+  /* TODO put str8 back with str8_str8
+   *      and use the same direction logic
+   *      as str_str */
+
   [CC_i8][CC_u16] = NULL,
   [CC_i8][CC_i16] = NULL,
   [CC_i8][CC_i32] = NULL,
