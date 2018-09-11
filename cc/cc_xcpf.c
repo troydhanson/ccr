@@ -99,6 +99,29 @@ static int xcpf_str_ipv46(UT_string *d, void *p, int flags) {
   return -1;
 }
 
+static int xcpf_str8_str(UT_string *d, void *p, int flags) {
+  if (flags & CC_FLAT2MEM) {
+    char *c;
+    uint8_t l;
+    memcpy(&l, p, sizeof(l));
+    c = (char*)p + sizeof(l);
+    utstring_bincpy(d, c, l);
+    utstring_bincpy(d, "\0", 1);
+    return 0;
+  }
+
+  assert(flags & CC_MEM2FLAT);
+  char **c = (char **)p;
+  uint32_t u = strlen(*c);
+  if (u > 255) return -1;
+  uint8_t l = (uint8_t)u;
+  utstring_bincpy(d, &l, sizeof(l));
+  if (l) utstring_bincpy(d, *c, l);
+  return 0;
+  return 0;
+}
+
+
 static int xcpf_str_str8(UT_string *d, void *p, int flags) {
   if (flags & CC_FLAT2MEM) return -1;
   char **c = (char **)p;
@@ -106,7 +129,7 @@ static int xcpf_str_str8(UT_string *d, void *p, int flags) {
   if (l > 255) return -1;
   uint8_t u8 = (uint8_t)l;
   utstring_bincpy(d, &u8, sizeof(u8));
-  if (l) utstring_printf(d, "%s", *c);
+  if (l) utstring_bincpy(d, *c, u8);
   return 0;
 }
 
@@ -126,7 +149,7 @@ static int xcpf_str_str(UT_string *d, void *p, int flags) {
   char **c = (char **)p;
   uint32_t l = strlen(*c);
   utstring_bincpy(d, &l, sizeof(l));
-  if (l) utstring_printf(d, "%s", *c);
+  if (l) utstring_bincpy(d, *c, l);
   return 0;
 }
 
@@ -135,7 +158,7 @@ static int xcpf_str_blob(UT_string *d, void *p, int flags) {
   char **c = (char **)p;
   uint32_t l = strlen(*c);
   utstring_bincpy(d, &l, sizeof(l));
-  if (l) utstring_printf(d, "%s", *c);
+  if (l) utstring_bincpy(d, *c, l);
   return 0;
 }
 
@@ -277,9 +300,18 @@ xcpf cc_conversions[/*from*/CC_MAX][/*to*/CC_MAX] = {
   [CC_str][CC_mac] = xcpf_str_mac,
   [CC_str][CC_blob] = xcpf_str_blob,
 
-  /* TODO put str8 back with str8_str8
-   *      and use the same direction logic
-   *      as str_str */
+  [CC_str8][CC_u16] = NULL,
+  [CC_str8][CC_i16] = NULL,
+  [CC_str8][CC_i32] = NULL,
+  [CC_str8][CC_ipv4] = NULL,
+  [CC_str8][CC_ipv46] = NULL,
+  [CC_str8][CC_str] = xcpf_str8_str,
+  [CC_str8][CC_str8] = NULL,
+  [CC_str8][CC_i8] = NULL,
+  [CC_str8][CC_d64] = NULL,
+  [CC_str8][CC_mac] = NULL,
+  [CC_str8][CC_blob] = NULL,
+
 
   [CC_i8][CC_u16] = NULL,
   [CC_i8][CC_i16] = NULL,
