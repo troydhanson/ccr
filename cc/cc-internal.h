@@ -35,7 +35,7 @@ const UT_mm ptr_mm;
 const UT_mm cc_mm;
 
 /* we have a table of conversion functions, which have this signature */
-typedef int (*xcpf)(UT_string *to, void *from); /* caller memory -> cc */
+typedef int (*xcpf)(UT_string *to, void *from, int flags);
 xcpf cc_conversions[CC_MAX][CC_MAX];
 int slot_to_json(cc_type ot, char *from, size_t from_len, json_t **j);
 

@@ -345,7 +345,7 @@ int cc_mapv(struct cc *cc, struct cc_map *map, int count) {
  *
  */
 int cc_capture(struct cc *cc, char **out, size_t *len) {
-  int rc = -1, i=0;
+  int rc = -1, i=0, sc;
   UT_string *df, *fn;
   cc_type *ot, *ct, t;
   void **mp, *p;
@@ -382,7 +382,10 @@ int cc_capture(struct cc *cc, char **out, size_t *len) {
     }
 
     xcpf fcn = cc_conversions[t][*ot];
-    if ((fcn == NULL) || (fcn(&cc->flat, p) < 0)) {
+    assert(fcn);
+
+    sc = fcn(&cc->flat, p, CC_MEM2FLAT);
+    if (sc < 0) {
       fprintf(stderr,"conversion error (%s)\n", n);
       goto done;
     }
@@ -551,7 +554,7 @@ int cc_restore(struct cc *cc, char *in, size_t in_len, int flags) {
 
       /* record offset in flat of next datum */
       off = cc->flat.i;
-      sc = fcn(&cc->flat, map[i].addr);
+      sc = fcn(&cc->flat, map[i].addr, CC_FLAT2MEM);
       if (sc < 0) {
         fprintf(stderr,"conversion error\n");
         goto done;

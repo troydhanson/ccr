@@ -8,6 +8,8 @@
 #define CC_FILE         (1U << 2)
 #define CC_BUFFER       (1U << 3)
 #define CC_NEWLINE      (1U << 4)
+#define CC_FLAT2MEM     (1U << 5)
+#define CC_MEM2FLAT     (1U << 6)
 
 #define CC_TYPES    x(i8)   \
                    x(i16)   \
