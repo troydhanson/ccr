@@ -564,7 +564,7 @@ int cc_restore(struct cc *cc, char *in, size_t in_len, int flags) {
        * or by pointer if its not of fixed length */
       l = cc_is_fixed_length(*ct);
       if (l) memcpy(*ca, cc->flat.d + off, l);
-      else if ((*ct == CC_ipv46) || (*ct == CC_blob)) {
+      else if (*ct == CC_ipv46) {
         p = cc->flat.d + off;
         memcpy(*ca, &p, sizeof(void*));
       } else if ((*ct == CC_str8) || (*ct == CC_str)) {
@@ -572,6 +572,11 @@ int cc_restore(struct cc *cc, char *in, size_t in_len, int flags) {
         off += sizeof(uint32_t);
         p = cc->flat.d + off;
         memcpy(*ca, &p, sizeof(void*));
+      } else if (*ct == CC_blob) {
+        p = cc->flat.d + off;
+        struct cc_blob *bp = (struct cc_blob*)ca;
+        memcpy(&bp->len, p, sizeof(uint32_t));
+        bp->buf = p + sizeof(uint32_t);
       } else {
         assert(0);
         goto done;

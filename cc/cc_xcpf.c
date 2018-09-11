@@ -28,7 +28,9 @@ static int xcpf_ipv46_ipv46(UT_string *d, void *p, int flags) {
   return 0;
 }
 
+/*****************************************************************/
 static int xcpf_str_u16(UT_string *d, void *p, int flags) {
+  if (flags & CC_FLAT2MEM) return -1;
   char **c = (char **)p;
   unsigned u;
   if (sscanf(*c, "%u", &u) != 1) return -1;
@@ -38,6 +40,7 @@ static int xcpf_str_u16(UT_string *d, void *p, int flags) {
 }
 
 static int xcpf_str_i16(UT_string *d, void *p, int flags) {
+  if (flags & CC_FLAT2MEM) return -1;
   char **c = (char **)p;
   int i;
   if (sscanf(*c, "%d", &i) != 1) return -1;
@@ -47,6 +50,7 @@ static int xcpf_str_i16(UT_string *d, void *p, int flags) {
 }
 
 static int xcpf_str_i32(UT_string *d, void *p, int flags) {
+  if (flags & CC_FLAT2MEM) return -1;
   char **c = (char **)p;
   int i;
   if (sscanf(*c, "%d", &i) != 1) return -1;
@@ -56,6 +60,7 @@ static int xcpf_str_i32(UT_string *d, void *p, int flags) {
 }
 
 static int xcpf_str_ipv4(UT_string *d, void *p, int flags) {
+  if (flags & CC_FLAT2MEM) return -1;
   char **s = (char **)p;
   struct in_addr ia;
   assert(sizeof(ia) == 4);
@@ -66,6 +71,7 @@ static int xcpf_str_ipv4(UT_string *d, void *p, int flags) {
 }
 
 static int xcpf_str_ipv46(UT_string *d, void *p, int flags) {
+  if (flags & CC_FLAT2MEM) return -1;
   char **s = (char **)p;
   struct in_addr ia4;
   struct in6_addr ia6;
@@ -94,6 +100,7 @@ static int xcpf_str_ipv46(UT_string *d, void *p, int flags) {
 }
 
 static int xcpf_str_str8(UT_string *d, void *p, int flags) {
+  if (flags & CC_FLAT2MEM) return -1;
   char **c = (char **)p;
   uint32_t l = strlen(*c);
   if (l > 255) return -1;
@@ -104,6 +111,18 @@ static int xcpf_str_str8(UT_string *d, void *p, int flags) {
 }
 
 static int xcpf_str_str(UT_string *d, void *p, int flags) {
+
+  if (flags & CC_FLAT2MEM) {
+    char *c;
+    uint32_t l;
+    memcpy(&l, p, sizeof(l));
+    c = (char*)p + sizeof(l);
+    utstring_bincpy(d, c, l);
+    utstring_bincpy(d, "\0", 1);
+    return 0;
+  }
+
+  assert(flags & CC_MEM2FLAT);
   char **c = (char **)p;
   uint32_t l = strlen(*c);
   utstring_bincpy(d, &l, sizeof(l));
@@ -112,6 +131,7 @@ static int xcpf_str_str(UT_string *d, void *p, int flags) {
 }
 
 static int xcpf_str_blob(UT_string *d, void *p, int flags) {
+  if (flags & CC_FLAT2MEM) return -1;
   char **c = (char **)p;
   uint32_t l = strlen(*c);
   utstring_bincpy(d, &l, sizeof(l));
@@ -120,6 +140,7 @@ static int xcpf_str_blob(UT_string *d, void *p, int flags) {
 }
 
 static int xcpf_str_i8(UT_string *d, void *p, int flags) {
+  if (flags & CC_FLAT2MEM) return -1;
   char **c = (char **)p;
   int i;
   if (sscanf(*c, "%d", &i) != 1) return -1;
@@ -129,6 +150,7 @@ static int xcpf_str_i8(UT_string *d, void *p, int flags) {
 }
 
 static int xcpf_str_d64(UT_string *d, void *p, int flags) {
+  if (flags & CC_FLAT2MEM) return -1;
   char **c = (char **)p;
   double f;
   if (sscanf(*c, "%lf", &f) != 1) return -1;
@@ -137,6 +159,7 @@ static int xcpf_str_d64(UT_string *d, void *p, int flags) {
 }
 
 static int xcpf_str_mac(UT_string *d, void *p, int flags) {
+  if (flags & CC_FLAT2MEM) return -1;
   char **c = (char **)p;
   unsigned int ma, mb, mc, md, me, mf;
   if (sscanf(*c, "%x:%x:%x:%x:%x:%x", &ma,&mb,&mc,&md,&me,&mf) != 6) return -1;
@@ -145,6 +168,8 @@ static int xcpf_str_mac(UT_string *d, void *p, int flags) {
   utstring_printf(d, "%c%c%c%c%c%c", ma, mb, mc, md, me, mf);
   return 0;
 }
+
+/*****************************************************************/
 
 static int xcpf_i8_i8(UT_string *d, void *p, int flags) {
   utstring_bincpy(d, p, sizeof(int8_t));
@@ -162,13 +187,22 @@ static int xcpf_mac_mac(UT_string *d, void *p, int flags) {
 }
 
 static int xcpf_blob_blob(UT_string *d, void *p, int flags) {
+  if (flags & CC_FLAT2MEM) {
+    /* put length at front just as it was in flat,
+     * then cc_restore pokes into caller struct */
+    uint32_t l;
+    memcpy(&l, p, sizeof(l));
+    utstring_bincpy(d, p, sizeof(l) + l);
+    return 0;
+  }
+
+  assert(flags & CC_MEM2FLAT);
   struct cc_blob *bp = (struct cc_blob*)p;
   uint32_t l = (uint32_t)bp->len;
   utstring_bincpy(d, &l, sizeof(l));
   if (l) utstring_bincpy(d, bp->buf, l);
   return 0;
 }
-
 
 xcpf cc_conversions[/*from*/CC_MAX][/*to*/CC_MAX] = {
   [CC_i16][CC_u16] = NULL,
