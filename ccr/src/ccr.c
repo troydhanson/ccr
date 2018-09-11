@@ -351,7 +351,7 @@ ssize_t ccr_getnext(struct ccr *ccr, int flags, ...) {
   /* RESTORE is the second major mode */
   if (flags & CCR_RESTORE) {
     assert((flags & CCR_BUFFER) == 0);
-    sc = cc_restore(ccr->cc, buf, nr);
+    sc = cc_restore(ccr->cc, buf, nr, 0);
     if (sc < 0) nr = -1;
   }
 
