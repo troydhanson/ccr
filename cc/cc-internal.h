@@ -27,6 +27,7 @@ struct cc {
   UT_vector /* of int       */ caller_types; /* caller pointer type i16 i32 etc */
   UT_vector /* struct cc_map */dissect_map;  /* fulfills cc_dissect */
   UT_string flat;                            /* concatenated packed values buffer */
+  UT_string rest;                            /* retored volatile values buffer */
   UT_string tmp;
   json_t *json;
 };
@@ -35,7 +36,7 @@ const UT_mm ptr_mm;
 const UT_mm cc_mm;
 
 /* we have a table of conversion functions, which have this signature */
-typedef int (*xcpf)(UT_string *to, void *from); /* caller memory -> cc */
+typedef int (*xcpf)(UT_string *to, void *from, int flags);
 xcpf cc_conversions[CC_MAX][CC_MAX];
 int slot_to_json(cc_type ot, char *from, size_t from_len, json_t **j);
 

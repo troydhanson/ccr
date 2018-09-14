@@ -345,7 +345,7 @@ int cc_mapv(struct cc *cc, struct cc_map *map, int count) {
  *
  */
 int cc_capture(struct cc *cc, char **out, size_t *len) {
-  int rc = -1, i=0;
+  int rc = -1, i=0, sc;
   UT_string *df, *fn;
   cc_type *ot, *ct, t;
   void **mp, *p;
@@ -382,7 +382,13 @@ int cc_capture(struct cc *cc, char **out, size_t *len) {
     }
 
     xcpf fcn = cc_conversions[t][*ot];
-    if ((fcn == NULL) || (fcn(&cc->flat, p) < 0)) {
+    if (fcn == NULL) {
+      fprintf(stderr, "unsupported conversion\n");
+      goto done;
+    }
+
+    sc = fcn(&cc->flat, p, CC_MEM2FLAT);
+    if (sc < 0) {
       fprintf(stderr,"conversion error (%s)\n", n);
       goto done;
     }
@@ -522,7 +528,7 @@ static size_t cc_is_fixed_length(cc_type t) {
  *
 */
 int cc_restore(struct cc *cc, char *in, size_t in_len, int flags) {
-  void **mp, **ca, *p, *flat_before=NULL;
+  void **mp, **ca, *p, *rest_before=NULL;
   int sc, rc = -1, count, i;
   struct cc_map *map = NULL;
   size_t off, l;
@@ -533,9 +539,9 @@ int cc_restore(struct cc *cc, char *in, size_t in_len, int flags) {
   sc = cc_dissect(cc, &map, &count, in, in_len, 0);
   if (sc < 0) goto done;
 
-  while(cc->flat.d != flat_before) {
-    utstring_clear(&cc->flat);
-    flat_before = cc->flat.d;
+  while(cc->rest.d != rest_before) {
+    utstring_clear(&cc->rest);
+    rest_before = cc->rest.d;
 
     for(i = 0; i < count; i++) {
 
@@ -547,11 +553,14 @@ int cc_restore(struct cc *cc, char *in, size_t in_len, int flags) {
       ct = utvector_elt(&cc->caller_types, i);
       ca = utvector_elt(&cc->caller_addrs, i);
       xcpf fcn = cc_conversions[map[i].type][*ct];
-      assert(fcn);
+      if (fcn == NULL) {
+        fprintf(stderr, "unsupported conversion\n");
+        goto done;
+      }
 
-      /* record offset in flat of next datum */
-      off = cc->flat.i;
-      sc = fcn(&cc->flat, map[i].addr);
+      /* record offset of next datum */
+      off = cc->rest.i;
+      sc = fcn(&cc->rest, map[i].addr, CC_FLAT2MEM);
       if (sc < 0) {
         fprintf(stderr,"conversion error\n");
         goto done;
@@ -560,15 +569,18 @@ int cc_restore(struct cc *cc, char *in, size_t in_len, int flags) {
       /* give caller the converted item by value,
        * or by pointer if its not of fixed length */
       l = cc_is_fixed_length(*ct);
-      if (l) memcpy(*ca, cc->flat.d + off, l);
-      else if ((*ct == CC_ipv46) || (*ct == CC_blob)) {
-        p = cc->flat.d + off;
+      if (l) memcpy(*ca, cc->rest.d + off, l);
+      else if (*ct == CC_ipv46) {
+        p = cc->rest.d + off;
         memcpy(*ca, &p, sizeof(void*));
       } else if ((*ct == CC_str8) || (*ct == CC_str)) {
-        utstring_bincpy(&cc->flat, "\0", sizeof(char));
-        off += sizeof(uint32_t);
-        p = cc->flat.d + off;
+        p = cc->rest.d + off;
         memcpy(*ca, &p, sizeof(void*));
+      } else if (*ct == CC_blob) {
+        p = cc->rest.d + off;
+        struct cc_blob *bp = (struct cc_blob*)(*ca);
+        memcpy(&bp->len, p, sizeof(uint32_t));
+        bp->buf = p + sizeof(uint32_t);
       } else {
         assert(0);
         goto done;

@@ -295,9 +295,6 @@ ssize_t ccr_getnext(struct ccr *ccr, int flags, ...) {
   if (flags & CCR_PRETTY)  fl |= CC_PRETTY;
   if (flags & CCR_NEWLINE) fl |= CC_NEWLINE;
 
-  /* get caller varargs */
-  out = va_arg(ap, char**);
-  out_len = va_arg(ap, size_t *);
 
  again: /* in case we need to grow recv buffer */
 
@@ -327,6 +324,10 @@ ssize_t ccr_getnext(struct ccr *ccr, int flags, ...) {
 
     assert((flags & CCR_RESTORE) == 0);
 
+    /* get caller varargs */
+    out = va_arg(ap, char**);
+    out_len = va_arg(ap, size_t *);
+
     if (flags & CCR_JSON) {
       sc = cc_to_json(ccr->cc, out, out_len, buf, nr, fl);
       if (sc < 0) nr = -1;
@@ -351,7 +352,7 @@ ssize_t ccr_getnext(struct ccr *ccr, int flags, ...) {
   /* RESTORE is the second major mode */
   if (flags & CCR_RESTORE) {
     assert((flags & CCR_BUFFER) == 0);
-    sc = cc_restore(ccr->cc, buf, nr);
+    sc = cc_restore(ccr->cc, buf, nr, 0);
     if (sc < 0) nr = -1;
   }
 
