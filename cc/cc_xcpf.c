@@ -15,6 +15,18 @@ static int xcpf_i32_i32(UT_string *d, void *p, int flags) {
   return 0;
 }
 
+static int xcpf_i32_ipv4(UT_string *d, void *p, int flags) {
+  utstring_bincpy(d, p, sizeof(int32_t));
+  return 0;
+}
+
+static int xcpf_i32_ipv46(UT_string *d, void *p, int flags) {
+  uint8_t u8 = 4;
+  utstring_bincpy(d, &u8, sizeof(u8));
+  utstring_bincpy(d, p, sizeof(int32_t));
+  return 0;
+}
+
 static int xcpf_ipv4_ipv4(UT_string *d, void *p, int flags) {
   utstring_bincpy(d, p, sizeof(int32_t));
   return 0;
@@ -255,8 +267,8 @@ xcpf cc_conversions[/*from*/CC_MAX][/*to*/CC_MAX] = {
   [CC_i32][CC_u16] = NULL,
   [CC_i32][CC_i16] = NULL,
   [CC_i32][CC_i32] = xcpf_i32_i32,
-  [CC_i32][CC_ipv4] = NULL,
-  [CC_i32][CC_ipv46] = NULL,
+  [CC_i32][CC_ipv4] = xcpf_i32_ipv4,
+  [CC_i32][CC_ipv46] = xcpf_i32_ipv46,
   [CC_i32][CC_str] = NULL,
   [CC_i32][CC_str8] = NULL,
   [CC_i32][CC_i8] = NULL,

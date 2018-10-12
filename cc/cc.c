@@ -383,7 +383,8 @@ int cc_capture(struct cc *cc, char **out, size_t *len) {
 
     xcpf fcn = cc_conversions[t][*ot];
     if (fcn == NULL) {
-      fprintf(stderr, "unsupported conversion\n");
+      fprintf(stderr, "cc_capture: unsupported conversion (%s -> %s)\n",
+         cc_types[t], cc_types[*ot]);
       goto done;
     }
 
@@ -554,7 +555,8 @@ int cc_restore(struct cc *cc, char *in, size_t in_len, int flags) {
       ca = utvector_elt(&cc->caller_addrs, i);
       xcpf fcn = cc_conversions[map[i].type][*ct];
       if (fcn == NULL) {
-        fprintf(stderr, "unsupported conversion\n");
+        fprintf(stderr, "cc_restore: unsupported conversion (%s -> %s)\n",
+         cc_types[map[i].type], cc_types[*ct]);
         goto done;
       }
 
