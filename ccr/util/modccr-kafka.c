@@ -20,7 +20,7 @@ struct mod_data {
   int pretty;    /* 1 to pretty-print json */
   unsigned n_pub;/* num messages published */
   unsigned n_ack;/* num messages confirmed */
-  char *ofile;   /* dump kafka offset to file */
+  struct shr *status_ring; /* ring for kafka status */
 
   /* latest message successfully delivered */
   int32_t partition;
@@ -117,13 +117,7 @@ static int mod_periodic(struct modccr *m) {
   do { n = rd_kafka_poll(md->k, 0); } while (n > 0);
 
   /* periodiclly report kafka offset */
-  if (md->ofile && (md->n_pub > 0)) {
-
-    fd = open(md->ofile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
-    if (fd == -1) {
-      fprintf(stderr, "open %s: %s\n", md->ofile, strerror(errno));
-      goto done;
-    }
+  if (md->status_ring && (md->n_pub > 0)) {
 
     sc = asprintf(&report,
               "{\n"
@@ -144,9 +138,9 @@ static int mod_periodic(struct modccr *m) {
       goto done;
     }
 
-    nr = write(fd, report, sc);
+    nr = shr_write(md->status_ring, report, sc);
     if (nr < 0) {
-      fprintf(stderr, "write: %s\n", strerror(errno));
+      fprintf(stderr, "shr_write: error %zd\n", nr);
       goto done;
     }
   }
@@ -163,7 +157,7 @@ static int mod_fini(struct modccr *m) {
 
   if (md->broker) free(md->broker);
   if (md->topic) free(md->topic);
-  if (md->ofile) free(md->ofile);
+  if (md->status_ring) shr_close(md->status_ring);
   free(md);
 
   return 0;
@@ -251,10 +245,10 @@ int ccr_module_init(struct modccr *m) {
   /* parse options */
   char *broker = NULL;
   char *topic = NULL;
-  char *ofile = NULL;
+  char *status_ring_name = NULL;
   size_t broker_len;
   size_t topic_len;
-  size_t ofile_len;
+  size_t status_ring_len;
   int pretty;
   size_t pretty_opt;
 
@@ -262,7 +256,10 @@ int ccr_module_init(struct modccr *m) {
     {.name = "broker", .type = sconf_str, .value = &broker,.vlen = &broker_len},
     {.name = "topic",  .type = sconf_str, .value = &topic, .vlen = &topic_len },
     {.name = "pretty", .type = sconf_int, .value = &pretty,.vlen = &pretty_opt},
-    {.name = "ofile",  .type = sconf_str, .value = &ofile, .vlen = &ofile_len},
+    {.name = "status-ring",  
+       .type = sconf_str,
+       .value = &status_ring_name, 
+       .vlen = &status_ring_len},
   };
 
   if (m->opts == NULL) goto done;
@@ -272,9 +269,11 @@ int ccr_module_init(struct modccr *m) {
   if ( (md->topic = strndup(topic, topic_len)) == NULL) goto done;
   if ( (md->broker = strndup(broker, broker_len)) == NULL) goto done;
   md->pretty = pretty_opt ? pretty : 0;
-  if (ofile) {
-    md->ofile = strndup(ofile, ofile_len);
-    if (md->ofile == NULL) goto done;
+  if (status_ring_name) {
+    status_ring_name = strndup(status_ring_name, status_ring_len);
+    if (status_ring_name == NULL) goto done;
+    md->status_ring = shr_open(status_ring_name, SHR_WRONLY);
+    if (md->status_ring == NULL) goto done;
   }
 
   /* initialize connections */
