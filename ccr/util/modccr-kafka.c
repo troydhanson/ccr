@@ -215,7 +215,7 @@ static int mod_work(struct modccr *m, struct ccr *ccr) {
   md->n_pub++;
 
   /* cause librdkafka to invoke pending cb's */
-  if ((md->n_pub % 100) == 0)
+  // if ((md->n_pub % 100) == 0)
     rd_kafka_poll(md->k, 0);
 
   rc = 0;
