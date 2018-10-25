@@ -72,6 +72,23 @@ static int setup_kafka(struct modccr *m) {
   rd_kafka_conf_set_opaque(md->conf, m);
   rd_kafka_conf_set_error_cb(md->conf, err_cb);
   rd_kafka_conf_set_dr_msg_cb(md->conf, delivery_report_cb);
+
+  /* request library accumulates for X milliseconds before transmit */
+  kr = rd_kafka_conf_set(md->conf, "queue.buffering.max.ms", "1000",
+      err, sizeof(err));
+  if (kr != RD_KAFKA_CONF_OK) {
+    fprintf(stderr,"rd_kafka_topic_conf_set: %s\n", err);
+    goto done;
+  }
+
+  /* request large batches before transmit */
+  kr = rd_kafka_conf_set(md->conf, "batch.num.messages", "100000",
+      err, sizeof(err));
+  if (kr != RD_KAFKA_CONF_OK) {
+    fprintf(stderr,"rd_kafka_topic_conf_set: %s\n", err);
+    goto done;
+  }
+
   md->topic_conf = rd_kafka_topic_conf_new();
 
   md->k = rd_kafka_new(RD_KAFKA_PRODUCER, md->conf, err, sizeof(err));
