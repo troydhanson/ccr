@@ -36,6 +36,7 @@ int ccr_close(struct ccr *ccr);
 int ccr_get_selectable_fd(struct ccr *ccr);
 int ccr_dissect(struct ccr *ccr, struct cc_map **map, int *count,
        char *in, size_t in_len, int flags);
+struct cc *ccr_get_cc(struct ccr *ccr);
 
 /* struct specific to ccr-tool and modules it loads */
 struct modccr {

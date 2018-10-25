@@ -252,16 +252,46 @@ int ccr_capture(struct ccr *ccr) {
 }
 
 /*
+ * ccr_readv
+ *
+ * Read several frames from the ring in bulk.
+ * Block if ring empty, or return immediately in CCR_NONBLOCK mode.
+ *
+ * flags                    varags                   description
+ * -----                    -----------------------  ---------------------
+ * n/a
+ *
+ * ccr_readv reads in bulk, populating the caller buffer of length len
+ * and the caller iovec array of length *niov, until either is exhausted
+ * or the available data is exhausted. On return the *niov is set to the
+ * actual number of iov populated
+ *
+ * returns:
+ *   0   (no data in ring, in non-blocking mode)
+ *  -1   (error)
+ *  -2   (buffer can't hold message)
+ *  -3   (caller descriptor became ready while blocked; see bw_ctl BW_POLLFD)
+ *
+ */
+ssize_t ccr_readv(struct ccr *ccr, int flags,
+                  char *buf, size_t len,
+                  struct iovec *iov, size_t *niov) {
+  ssize_t nr;
+
+  nr = shr_readv(ccr->shr, buf, len, iov, niov);
+  return nr;
+}
+
+/*
  * ccr_getnext
  *
  * Read one frame from the ring.
  * Block if ring empty, or return immediately in CCR_NONBLOCK mode.
  *
- * flags                   varags                 description
- * -----                  ---------------------   ---------------------
- * CCR_BUFFER             char**buf, size_t *len  get volatile buffer
- * CCR_BUFFER| CCR_JSON   char**buf, size_t *len  get volatile json buffer
- * CCR_RESTORE            n/a                     unpack to caller memory
+ * flags                    varags                   description
+ * -----                    -----------------------  ---------------------
+ * CCR_RESTORE              n/a                      unpack to caller memory
+ * CCR_BUFFER  [|CCR_JSON]  char**item, size_t *len  get volatile buffer
  *
  * if CCR_JSON is specified, CCR_PRETTY and CCR_NEWLINE may be
  * OR'd to pretty-print the JSON and append a newline respectively.
@@ -287,14 +317,13 @@ ssize_t ccr_getnext(struct ccr *ccr, int flags, ...) {
   va_list ap;
   va_start(ap, flags);
 
-  /* must be one mode or the other */
+  /* must be one major mode or the other */
   v += (flags & CCR_BUFFER) ?  1 : 0;
   v += (flags & CCR_RESTORE) ? 1 : 0;
   if (v != 1) goto done;
 
   if (flags & CCR_PRETTY)  fl |= CC_PRETTY;
   if (flags & CCR_NEWLINE) fl |= CC_NEWLINE;
-
 
  again: /* in case we need to grow recv buffer */
 
@@ -429,3 +458,6 @@ int ccr_dissect(struct ccr *ccr, struct cc_map **map, int *count,
   return sc;
 }
 
+struct cc *ccr_get_cc(struct ccr *ccr) {
+  return ccr->cc;
+}
