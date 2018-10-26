@@ -13,10 +13,14 @@
 #include "sconf.h"
 
 #define adim(x) (sizeof(x)/sizeof(*x))
+#define NUM_IOV 100000
+#define BATCH_BUF_SZ (60*NUM_IOV)
+#define FLUSH_TIMEOUT_MS 10000
 
 struct mod_data {
   char *broker;  /* kafka broker */
   char *topic;   /* topic to publish to */
+  int json;      /* 1 to produce json not binary */
   int pretty;    /* 1 to pretty-print json */
   unsigned n_pub;/* num messages published */
   unsigned n_ack;/* num messages confirmed */
@@ -31,6 +35,10 @@ struct mod_data {
   rd_kafka_topic_t *t;
   rd_kafka_conf_t *conf;
   rd_kafka_topic_conf_t *topic_conf;
+
+  /* batch read support */
+  struct iovec iov[NUM_IOV];
+  char buf[BATCH_BUF_SZ];
 };
 
 static void err_cb (rd_kafka_t *rk, int err, const char *reason, void *opaque) {
@@ -59,6 +67,7 @@ static void delivery_report_cb ( rd_kafka_t *rk, const rd_kafka_message_t *msg,
   /* record partition/offset from message delivery report */
   md->partition = msg->partition;
   md->offset = msg->offset;
+  //fprintf(stderr, "dr-cb offset:%ld partition:%d\n", md->offset, md->partition);
 
   //rd_kafka_message_destroy(msg);
 }
@@ -160,6 +169,8 @@ static int mod_periodic(struct modccr *m) {
       fprintf(stderr, "shr_write: error %zd\n", nr);
       goto done;
     }
+
+    //fprintf(stderr, "%s", report);
   }
 
  done:
@@ -181,60 +192,90 @@ static int mod_fini(struct modccr *m) {
 }
 
 static int mod_work(struct modccr *m, struct ccr *ccr) {
+  int sc, fl=0, rc = -1, msgflags=0, json_fl=0;
   struct mod_data *md = (struct mod_data*)m->data;
-  int sc, fl, rc = -1;
-  const char *err;
-  char *out;
-  size_t len;
+  size_t niov, i, len, oln;
+  rd_kafka_resp_err_t err;
+  const char *serr;
+  ssize_t nr;
+  char *out, *msg;
+  struct cc *cc;
 
-  if (m->verbose) fprintf(stderr, "mod_work\n");
+  cc = ccr_get_cc(ccr);
+  json_fl |= md->pretty ? CCR_PRETTY : 0;
 
-  fl = CCR_BUFFER | CCR_JSON;
-  fl |= md->pretty ? CCR_PRETTY : 0;
-  sc = ccr_getnext(ccr, fl, &out, &len);
-  if (sc < 0) goto done;
-  if (sc == 0) {
+  if (md->json)
+    msgflags = RD_KAFKA_MSG_F_COPY;
+
+  niov = NUM_IOV;
+  nr = ccr_readv(ccr, fl, md->buf, BATCH_BUF_SZ, md->iov, &niov);
+  if (nr < 0) goto done;
+  if (nr == 0) {
     rc = 0;
     goto done;
   }
 
-  /* publish one message.
+  /* publish one message at a time
    *
    * librdkafka returns an "error" if the producer queue
    * is full, which requires draining using rd_kafka_poll
    * and retrying (c.f. examples/rdkafka_simple_producer.c)
    */
- retry:
-  sc = rd_kafka_produce(md->t, RD_KAFKA_PARTITION_UA, 
-       RD_KAFKA_MSG_F_COPY, out, len, NULL, 0, NULL);
-  if (sc < 0) {
+  i = 0;
+  while (i < niov) {
+
+    /* let it invoke callbacks */
+    rd_kafka_poll(md->k, 0);
+
+    msg = md->iov[i].iov_base;
+    len = md->iov[i].iov_len;
+
+    if (md->json) {
+      sc = cc_to_json(cc, &out, &oln, msg, len, json_fl);
+      if (sc < 0) goto done;
+    } else {
+      out = msg;
+      oln = len;
+    }
+
+    sc = rd_kafka_produce(md->t, RD_KAFKA_PARTITION_UA,
+         msgflags, out, oln, NULL, 0, NULL);
+    if (sc == 0) {
+      /* success */
+      md->n_pub++;
+      i++;
+      continue;
+    }
+
+    /* error: momentary queue-full or fatal error */
+    assert(sc < 0);
+
 #if RD_KAFKA_VERSION < 0x00090100
-    if (errno == ENOBUFS) {
-      rd_kafka_poll(md->k, 1000);
-      goto retry;
-    } else {
-      err = rd_kafka_err2str( rd_kafka_errno2err(errno) );
-      fprintf(stderr, "rd_kafka_produce: %s\n", err);
-      goto done;
-    }
+    if (errno == ENOBUFS)
+      continue;
+
+    serr = rd_kafka_err2str( rd_kafka_errno2err(errno) );
+    fprintf(stderr, "rd_kafka_produce: %s\n", serr);
+    goto done;
 #else
-    if (rd_kafka_last_error() == RD_KAFKA_RESP_ERR__QUEUE_FULL) {
-      rd_kafka_poll(md->k, 1000);
-      goto retry;
-    } else {
-      err = rd_kafka_err2str( rd_kafka_last_error() );
-      fprintf(stderr, "rd_kafka_produce: %s\n", err);
-      goto done;
-    }
+    if (rd_kafka_last_error() == RD_KAFKA_RESP_ERR__QUEUE_FULL)
+      continue;
+
+    serr = rd_kafka_err2str( rd_kafka_last_error() );
+    fprintf(stderr, "rd_kafka_produce: %s\n", serr);
+    goto done;
 #endif
   }
 
-  md->n_pub++;
 
-  /* cause librdkafka to invoke pending cb's */
-  // if ((md->n_pub % 100) == 0)
-    rd_kafka_poll(md->k, 0);
+  /* flush delivery queue, only then can md->buf be reused */
+  do {
+    err = rd_kafka_flush(md->k, FLUSH_TIMEOUT_MS);
+    if (err == RD_KAFKA_RESP_ERR__TIMED_OUT)
+      fprintf(stderr, "timeout rd_kafka_flush, retrying\n");
+  } while (err != RD_KAFKA_RESP_ERR_NO_ERROR);
 
+  fprintf(stderr, "%zu messages sent\n", niov);
   rc = 0;
 
  done:
@@ -242,7 +283,7 @@ static int mod_work(struct modccr *m, struct ccr *ccr) {
 }
 
 void mod_usage(void) {
-  fprintf(stderr, "broker=<broker>,topic=<topic>,pretty=[0|1]\n");
+  fprintf(stderr, "broker=<broker>,topic=<topic>,json=[0|1],pretty=[0|1],status-ring=<file>\n");
 }
 
 int ccr_module_init(struct modccr *m) {
@@ -263,16 +304,18 @@ int ccr_module_init(struct modccr *m) {
   char *broker = NULL;
   char *topic = NULL;
   char *status_ring_name = NULL;
-  size_t broker_len;
-  size_t topic_len;
-  size_t status_ring_len;
-  int pretty;
-  size_t pretty_opt;
+  size_t broker_len=0;
+  size_t topic_len=0;
+  size_t status_ring_len=0;
+  int pretty, json;
+  size_t pretty_opt=0;
+  size_t json_opt=0;
 
   struct sconf sc[] = {
     {.name = "broker", .type = sconf_str, .value = &broker,.vlen = &broker_len},
     {.name = "topic",  .type = sconf_str, .value = &topic, .vlen = &topic_len },
     {.name = "pretty", .type = sconf_int, .value = &pretty,.vlen = &pretty_opt},
+    {.name = "json",   .type = sconf_int, .value = &json,  .vlen = &json_opt},
     {.name = "status-ring",  
        .type = sconf_str,
        .value = &status_ring_name, 
@@ -286,6 +329,7 @@ int ccr_module_init(struct modccr *m) {
   if ( (md->topic = strndup(topic, topic_len)) == NULL) goto done;
   if ( (md->broker = strndup(broker, broker_len)) == NULL) goto done;
   md->pretty = pretty_opt ? pretty : 0;
+  md->json = json_opt ? json : 0;
   if (status_ring_name) {
     status_ring_name = strndup(status_ring_name, status_ring_len);
     if (status_ring_name == NULL) goto done;
