@@ -3,6 +3,7 @@ srcdir = @srcdir@
 bin_PROGRAMS = ccr-tool 
 lib_LTLIBRARIES = libmodccr_dummy.la
 noinst_HEADERS = sconf.h
+noinst_PROGRAMS = ccr-bulkread-template
 
 ccr_tool_SOURCES = ccr-tool.c
 ccr_tool_CPPFLAGS = -I$(srcdir)/../src -I$(srcdir)/../../cc -I$(srcdir)/../../lib/libut_build/libut/include
@@ -20,3 +21,9 @@ libmodccr_kafka_la_CPPFLAGS = -I$(srcdir)/../src -I$(srcdir)/../../cc -I$(srcdir
 libmodccr_kafka_la_LIBDADD = -L../src -lccr 
 libmodccr_kafka_la_LDFLAGS = -version-info 0:0:0 -lshr -ljansson -lrdkafka
 endif
+
+ccr_bulkread_template_SOURCES = ccr-bulkread-template.c
+ccr_bulkread_template_CPPFLAGS =
+ccr_bulkread_template_LDADD = -lccr -lshr -ljansson
+
+
