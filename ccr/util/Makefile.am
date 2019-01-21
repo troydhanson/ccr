@@ -23,7 +23,7 @@ libmodccr_kafka_la_LDFLAGS = -version-info 0:0:0 -lshr -ljansson -lrdkafka
 endif
 
 ccr_bulkread_template_SOURCES = ccr-bulkread-template.c
-ccr_bulkread_template_CPPFLAGS =
-ccr_bulkread_template_LDADD = -lccr -lshr -ljansson
+ccr_bulkread_template_CPPFLAGS = -I$(srcdir)/../src -I$(srcdir)/../../cc -I$(srcdir)/../../lib/libut_build/libut/include
+ccr_bulkread_template_LDADD = -L../src -lccr -L../../lib/libut_build -lut -lshr -ljansson 
 
 
